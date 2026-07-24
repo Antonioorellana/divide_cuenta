@@ -1,15 +1,13 @@
 "use client";
 
-import {
-  ChangeEvent,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { ChangeEvent, useMemo, useRef, useState } from "react";
+
+type Step = "capture" | "people" | "assign" | "summary";
 
 type Participant = {
   id: string;
   name: string;
+  tone: "mint" | "lavender" | "blue" | "peach";
 };
 
 type BillItem = {
@@ -22,16 +20,16 @@ type BillItem = {
 };
 
 const INITIAL_PARTICIPANTS: Participant[] = [
-  { id: "pedro", name: "Pedro" },
-  { id: "ana", name: "Ana" },
-  { id: "luis", name: "Luis" },
-  { id: "carla", name: "Carla" },
+  { id: "pedro", name: "Pedro", tone: "mint" },
+  { id: "ana", name: "Ana", tone: "lavender" },
+  { id: "luis", name: "Luis", tone: "blue" },
+  { id: "carla", name: "Carla", tone: "peach" },
 ];
 
 const INITIAL_ITEMS: BillItem[] = [
   {
     id: "cerveza",
-    name: "Cerveza artesanal",
+    name: "Cerveza",
     quantity: 4,
     total: 16000,
     shared: false,
@@ -39,7 +37,7 @@ const INITIAL_ITEMS: BillItem[] = [
   },
   {
     id: "hamburguesa",
-    name: "Hamburguesa de la casa",
+    name: "Hamburguesa",
     quantity: 2,
     total: 24000,
     shared: false,
@@ -47,7 +45,7 @@ const INITIAL_ITEMS: BillItem[] = [
   },
   {
     id: "tabla",
-    name: "Tabla para compartir",
+    name: "Tabla",
     quantity: 1,
     total: 15000,
     shared: true,
@@ -55,13 +53,15 @@ const INITIAL_ITEMS: BillItem[] = [
   },
   {
     id: "agua",
-    name: "Agua mineral",
+    name: "Agua",
     quantity: 2,
     total: 5000,
     shared: false,
     assignments: { ana: 1 },
   },
 ];
+
+const TONES: Participant["tone"][] = ["mint", "lavender", "blue", "peach"];
 
 const currencyFormatter = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -74,8 +74,12 @@ function formatCurrency(value: number): string {
 }
 
 /**
- * Distribuye un monto entero de forma proporcional usando restos mayores.
- * Esto garantiza que los montos individuales sumen exactamente el total.
+ * Distribuye pesos enteros por peso relativo y entrega los residuos de forma
+ * determinista para que la suma nunca difiera del total original.
+ *
+ * @param total Monto total en pesos chilenos.
+ * @param weights Peso relativo de cada participante.
+ * @returns Montos enteros reconciliados por participante.
  */
 function allocateAmount(
   total: number,
@@ -84,17 +88,19 @@ function allocateAmount(
   const entries = Object.entries(weights).filter(([, weight]) => weight > 0);
   const totalWeight = entries.reduce((sum, [, weight]) => sum + weight, 0);
 
-  if (totalWeight === 0 || entries.length === 0) {
+  if (totalWeight === 0) {
     return {};
   }
 
   const allocations = entries.map(([id, weight]) => {
-    const exact = (total * weight) / totalWeight;
-    const base = Math.floor(exact);
-    return { id, value: base, remainder: exact - base };
+    const exactValue = (total * weight) / totalWeight;
+    const value = Math.floor(exactValue);
+    return { id, value, remainder: exactValue - value };
   });
 
-  let remaining = total - allocations.reduce((sum, item) => sum + item.value, 0);
+  let remaining =
+    total - allocations.reduce((sum, allocation) => sum + allocation.value, 0);
+
   allocations.sort(
     (first, second) =>
       second.remainder - first.remainder || first.id.localeCompare(second.id),
@@ -105,7 +111,9 @@ function allocateAmount(
     remaining -= 1;
   }
 
-  return Object.fromEntries(allocations.map(({ id, value }) => [id, value]));
+  return Object.fromEntries(
+    allocations.map(({ id, value }) => [id, value]),
+  );
 }
 
 function calculateSubtotals(
@@ -124,9 +132,9 @@ function calculateSubtotals(
             .map(([participantId]) => [participantId, 1]),
         )
       : item.assignments;
-    const itemAllocations = allocateAmount(item.total, weights);
 
-    for (const [participantId, amount] of Object.entries(itemAllocations)) {
+    const allocations = allocateAmount(item.total, weights);
+    for (const [participantId, amount] of Object.entries(allocations)) {
       subtotals[participantId] = (subtotals[participantId] ?? 0) + amount;
     }
   }
@@ -135,6 +143,7 @@ function calculateSubtotals(
 }
 
 export function CuentaApp() {
+  const [step, setStep] = useState<Step>("capture");
   const [participants, setParticipants] =
     useState<Participant[]>(INITIAL_PARTICIPANTS);
   const [items, setItems] = useState<BillItem[]>(INITIAL_ITEMS);
@@ -143,8 +152,9 @@ export function CuentaApp() {
   const [newParticipant, setNewParticipant] = useState("");
   const [billImage, setBillImage] = useState<File | null>(null);
   const [billImageUrl, setBillImageUrl] = useState<string | null>(null);
-  const [showSummary, setShowSummary] = useState(false);
+  const [usingDemo, setUsingDemo] = useState(false);
   const [shareStatus, setShareStatus] = useState("");
+  const [sessionDeleted, setSessionDeleted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const billSubtotal = useMemo(
@@ -168,50 +178,56 @@ export function CuentaApp() {
         (tipAllocations[participant.id] ?? 0),
     ]),
   );
-  const assignedUnits = items.reduce(
-    (sum, item) =>
-      sum +
-      (item.shared
-        ? item.quantity
-        : Object.values(item.assignments).reduce(
-            (itemSum, quantity) => itemSum + quantity,
-            0,
-          )),
-    0,
-  );
+
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
-  const allAssigned = items.every((item) =>
-    item.shared
-      ? Object.values(item.assignments).filter(Boolean).length >= 2
-      : Object.values(item.assignments).reduce(
-          (sum, quantity) => sum + quantity,
-          0,
-        ) === item.quantity,
-  );
+  const assignedUnits = items.reduce((sum, item) => {
+    if (item.shared) {
+      return (
+        sum +
+        (Object.values(item.assignments).filter(Boolean).length >= 2
+          ? item.quantity
+          : 0)
+      );
+    }
+    return (
+      sum +
+      Object.values(item.assignments).reduce(
+        (itemSum, quantity) => itemSum + quantity,
+        0,
+      )
+    );
+  }, 0);
+  const allAssigned = items.every((item) => {
+    const assigned = Object.values(item.assignments);
+    return item.shared
+      ? assigned.filter(Boolean).length >= 2
+      : assigned.reduce((sum, quantity) => sum + quantity, 0) === item.quantity;
+  });
 
   function handleBillImage(event: ChangeEvent<HTMLInputElement>) {
     const [file] = Array.from(event.target.files ?? []);
-    if (file) {
-      if (billImageUrl) {
-        URL.revokeObjectURL(billImageUrl);
-      }
-      setBillImage(file);
-      setBillImageUrl(URL.createObjectURL(file));
-      setShareStatus("");
+    if (!file) {
+      return;
     }
+    if (billImageUrl) {
+      URL.revokeObjectURL(billImageUrl);
+    }
+    setBillImage(file);
+    setBillImageUrl(URL.createObjectURL(file));
+    setUsingDemo(false);
   }
 
   function addParticipant() {
-    const trimmedName = newParticipant.trim();
-    if (!trimmedName) {
+    const name = newParticipant.trim();
+    if (!name) {
       return;
     }
-
     setParticipants((current) => [
       ...current,
       {
-        id: `${trimmedName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`,
-        name: trimmedName,
+        id: `${name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`,
+        name,
+        tone: TONES[current.length % TONES.length],
       },
     ]);
     setNewParticipant("");
@@ -224,9 +240,11 @@ export function CuentaApp() {
           return item;
         }
 
+        const nextAssignments = { ...item.assignments };
+        const currentQuantity = nextAssignments[participantId] ?? 0;
+
         if (item.shared) {
-          const nextAssignments = { ...item.assignments };
-          if (nextAssignments[participantId]) {
+          if (currentQuantity > 0) {
             delete nextAssignments[participantId];
           } else {
             nextAssignments[participantId] = 1;
@@ -234,23 +252,18 @@ export function CuentaApp() {
           return { ...item, assignments: nextAssignments };
         }
 
-        const assigned = Object.values(item.assignments).reduce(
+        const totalAssigned = Object.values(nextAssignments).reduce(
           (sum, quantity) => sum + quantity,
           0,
         );
-        const currentQuantity = item.assignments[participantId] ?? 0;
-        const nextAssignments = { ...item.assignments };
 
-        if (currentQuantity > 0 && assigned >= item.quantity) {
-          nextAssignments[participantId] = currentQuantity - 1;
-        } else if (assigned < item.quantity) {
+        if (totalAssigned < item.quantity) {
           nextAssignments[participantId] = currentQuantity + 1;
-        } else {
-          return item;
-        }
-
-        if (nextAssignments[participantId] === 0) {
-          delete nextAssignments[participantId];
+        } else if (currentQuantity > 0) {
+          nextAssignments[participantId] = currentQuantity - 1;
+          if (nextAssignments[participantId] === 0) {
+            delete nextAssignments[participantId];
+          }
         }
 
         return { ...item, assignments: nextAssignments };
@@ -299,155 +312,152 @@ Total distribuido: ${formatCurrency(grandTotal)} ✅`;
 
   async function shareSummary() {
     const summary = buildSummary();
-    const shareData: ShareData = {
-      title: "División de la cuenta",
-      text: summary,
-      files: billImage ? [billImage] : undefined,
-    };
-
     try {
-      const canShareFiles =
+      const canShareFile =
         !billImage ||
         (typeof navigator.canShare === "function" &&
           navigator.canShare({ files: [billImage] }));
 
-      if (typeof navigator.share === "function" && canShareFiles) {
-        await navigator.share(shareData);
-        setShareStatus("El resumen se entregó al menú de compartir.");
+      if (typeof navigator.share === "function" && canShareFile) {
+        await navigator.share({
+          title: "La Justa · Resumen",
+          text: summary,
+          files: billImage ? [billImage] : undefined,
+        });
+        setShareStatus("Resumen entregado al menú de compartir.");
         return;
       }
 
       await navigator.clipboard.writeText(summary);
-      setShareStatus(
-        "Tu dispositivo no permite adjuntar la imagen desde aquí. El resumen quedó copiado.",
-      );
+      setShareStatus("Resumen copiado. Tu navegador no admite adjuntar archivos.");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setShareStatus("El envío fue cancelado. La cuenta sigue disponible.");
+        setShareStatus("Envío cancelado. La sesión sigue disponible.");
         return;
       }
-      setShareStatus("No pudimos compartir. Intenta copiar el resumen.");
+      setShareStatus("No pudimos compartir el resumen.");
     }
   }
 
-  function clearSession() {
+  function deleteSession() {
     if (billImageUrl) {
       URL.revokeObjectURL(billImageUrl);
     }
-    setParticipants([]);
-    setItems([]);
     setBillImage(null);
     setBillImageUrl(null);
-    setPayerId("");
-    setShowSummary(false);
-    setShareStatus("");
+    setParticipants([]);
+    setItems([]);
+    setSessionDeleted(true);
   }
 
-  if (participants.length === 0 && items.length === 0) {
+  if (sessionDeleted) {
     return (
-      <main className="empty-state">
-        <div className="brand-mark">LJ</div>
-        <p className="eyebrow">Sesión eliminada</p>
-        <h1>La cuenta ya no está en este dispositivo.</h1>
-        <p>
-          Recarga la página para iniciar una nueva división desde cero.
+      <main className="app-frame centered-screen">
+        <div className="success-orb">✓</div>
+        <p className="overline">Sesión eliminada</p>
+        <h1>Todo listo.</h1>
+        <p className="muted">
+          La cuenta, los alias y las asignaciones ya no están en este
+          dispositivo.
         </p>
+        <button className="primary-action" onClick={() => window.location.reload()}>
+          Dividir otra cuenta <span>→</span>
+        </button>
       </main>
     );
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">LJ</span>
-          <div>
-            <strong>La Justa</strong>
-            <small>Divide. Comparte. Listo.</small>
+    <main className="app-frame">
+      <AppHeader step={step} onBack={() => setStep(previousStep(step))} />
+
+      {step === "capture" && (
+        <section className="screen capture-screen">
+          <div className="hero-copy">
+            <h1>
+              Divide.
+              <br />
+              Comparte.
+              <br />
+              <span>Listo.</span>
+            </h1>
+            <p>
+              La forma más rápida y ordenada de gestionar cuentas compartidas
+              entre amigos.
+            </p>
           </div>
-        </div>
-        <span className="privacy-pill">
-          <span aria-hidden="true">●</span> Sesión temporal
-        </span>
-      </header>
 
-      <section className="hero">
-        <div>
-          <p className="eyebrow">Cuenta activa · Mesa 12</p>
-          <h1>¿Quién consumió qué?</h1>
-          <p className="hero-copy">
-            Marca las cantidades o activa “Compartir” cuando el consumo fue
-            grupal.
-          </p>
-        </div>
+          <button
+            className={`capture-card ${billImageUrl ? "with-image" : ""}`}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {billImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={billImageUrl} alt="Cuenta detallada seleccionada" />
+            ) : (
+              <div className="receipt-placeholder">
+                <span className="camera-orb">▣</span>
+                <strong>Cuenta detallada</strong>
+                <small>Precuenta, comanda o preboleta</small>
+              </div>
+            )}
+            <span className="upload-action">
+              <b>▣</b> {billImageUrl ? "Reemplazar cuenta" : "Subir cuenta detallada"}
+            </span>
+          </button>
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleBillImage}
+          />
 
-        <button
-          className={`bill-preview ${billImageUrl ? "has-image" : ""}`}
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          {billImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={billImageUrl} alt="Vista previa de la cuenta fotografiada" />
-          ) : (
-            <>
-              <span className="receipt-icon" aria-hidden="true">
-                ▤
-              </span>
-              <span>
-                <strong>Adjuntar cuenta</strong>
-                <small>Foto de la precuenta</small>
-              </span>
-            </>
+          <button
+            className="text-action"
+            type="button"
+            onClick={() => {
+              setUsingDemo(true);
+              setStep("people");
+            }}
+          >
+            Usar cuenta de ejemplo ↗
+          </button>
+
+          {billImage && (
+            <button className="primary-action" onClick={() => setStep("people")}>
+              Continuar con esta cuenta <span>→</span>
+            </button>
           )}
-        </button>
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={handleBillImage}
-        />
-      </section>
 
-      <section className="people-panel" aria-labelledby="people-title">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Paso 1</p>
-            <h2 id="people-title">Asistentes</h2>
+          <div className="feature-grid">
+            <article>
+              <span className="feature-icon mint">⌁</span>
+              <strong>Escaneo IA</strong>
+              <p>Próxima etapa: detección y revisión automática de productos.</p>
+            </article>
+            <article>
+              <span className="feature-icon lavender">♙</span>
+              <strong>Sin fricción</strong>
+              <p>Alias temporales, sin cuentas ni datos personales.</p>
+            </article>
           </div>
-          <span>{participants.length} personas</span>
-        </div>
+        </section>
+      )}
 
-        <div className="people-list">
-          {participants.map((participant) => (
-            <label
-              className={`person-chip ${
-                payerId === participant.id ? "is-payer" : ""
-              }`}
-              key={participant.id}
-            >
-              <input
-                type="radio"
-                name="payer"
-                value={participant.id}
-                checked={payerId === participant.id}
-                onChange={() => setPayerId(participant.id)}
-              />
-              <span className="avatar">{participant.name.slice(0, 1)}</span>
-              <span>
-                <strong>{participant.name}</strong>
-                <small>
-                  {payerId === participant.id ? "Pagó la cuenta" : "Asistente"}
-                </small>
-              </span>
-            </label>
-          ))}
-          <div className="add-person">
+      {step === "people" && (
+        <section className="screen">
+          <ScreenTitle
+            title="Participantes"
+            description="Añade a quienes compartieron la cuenta y selecciona quién pagó el total."
+          />
+
+          <div className="add-person-field">
             <input
-              aria-label="Nombre o alias del nuevo asistente"
-              placeholder="Agregar alias"
+              aria-label="Nombre o alias"
+              placeholder="Agregar nombre..."
               value={newParticipant}
               onChange={(event) => setNewParticipant(event.target.value)}
               onKeyDown={(event) => {
@@ -456,263 +466,314 @@ Total distribuido: ${formatCurrency(grandTotal)} ✅`;
                 }
               }}
             />
-            <button type="button" onClick={addParticipant}>
+            <button type="button" onClick={addParticipant} aria-label="Agregar">
               +
             </button>
           </div>
-        </div>
-      </section>
 
-      <section className="items-section" aria-labelledby="items-title">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Paso 2</p>
-            <h2 id="items-title">Detalle del consumo</h2>
-          </div>
-          <div className={`progress-badge ${allAssigned ? "complete" : ""}`}>
-            {assignedUnits}/{totalUnits} asignados
-          </div>
-        </div>
-
-        <div className="items-list">
-          {items.map((item) => {
-            const itemAssigned = Object.values(item.assignments).reduce(
-              (sum, quantity) => sum + quantity,
-              0,
-            );
-            const complete = item.shared
-              ? Object.values(item.assignments).filter(Boolean).length >= 2
-              : itemAssigned === item.quantity;
-
-            return (
-              <article
-                className={`item-card ${complete ? "is-complete" : ""}`}
-                key={item.id}
+          <div className="participant-list">
+            {participants.map((participant) => (
+              <button
+                className={`participant-row ${
+                  payerId === participant.id ? "payer-selected" : ""
+                }`}
+                type="button"
+                key={participant.id}
+                onClick={() => setPayerId(participant.id)}
               >
-                <div className="item-topline">
-                  <div className="item-description">
-                    <span className="quantity">{item.quantity}×</span>
+                <ParticipantAvatar participant={participant} />
+                <span className="participant-info">
+                  <strong>{participant.name}</strong>
+                  <small>
+                    {payerId === participant.id
+                      ? "Realizó el pago"
+                      : "Participante"}
+                  </small>
+                </span>
+                <span className="payer-choice">
+                  <small>¿Pagó?</small>
+                  <b>{payerId === participant.id ? "✓" : ""}</b>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <button className="primary-action sticky-action" onClick={() => setStep("assign")}>
+            Continuar a consumos <span>→</span>
+          </button>
+        </section>
+      )}
+
+      {step === "assign" && (
+        <section className="screen assign-screen">
+          <ScreenTitle
+            title="Asignar consumo"
+            description="Reparte los productos entre los participantes."
+          />
+
+          <div className="consumption-list">
+            {items.map((item) => {
+              const totalAssigned = Object.values(item.assignments).reduce(
+                (sum, quantity) => sum + quantity,
+                0,
+              );
+              const selectedPeople = Object.values(item.assignments).filter(Boolean)
+                .length;
+              const complete = item.shared
+                ? selectedPeople >= 2
+                : totalAssigned === item.quantity;
+
+              return (
+                <article className="consumption-card" key={item.id}>
+                  <div className="consumption-heading">
                     <div>
-                      <h3>{item.name}</h3>
-                      <small>
-                        {formatCurrency(Math.round(item.total / item.quantity))}{" "}
-                        c/u
-                      </small>
+                      <strong>
+                        {item.quantity}× {item.name}
+                      </strong>
+                      <b>{formatCurrency(item.total)}</b>
                     </div>
+                    <span className={complete ? "status-complete" : "status-pending"}>
+                      {complete ? "✓ Completo" : "○ Incompleto"}
+                    </span>
                   </div>
-                  <div className="item-price">
-                    <strong>{formatCurrency(item.total)}</strong>
-                    <span>{complete ? "Completo" : "Pendiente"}</span>
+
+                  <div className="assignment-pills">
+                    {participants.map((participant) => {
+                      const quantity = item.assignments[participant.id] ?? 0;
+                      return (
+                        <button
+                          className={`person-assignment ${participant.tone} ${
+                            quantity > 0 ? "active" : ""
+                          }`}
+                          type="button"
+                          key={participant.id}
+                          onClick={() =>
+                            updateAssignment(item.id, participant.id)
+                          }
+                        >
+                          <span>{participant.name}</span>
+                          <strong>
+                            {item.shared ? (quantity ? "✓" : "—") : quantity || "—"}
+                          </strong>
+                        </button>
+                      );
+                    })}
+                    {!item.shared && !complete && (
+                      <span className="pending-unit">
+                        <small>Pendiente</small>
+                        <b>{item.quantity - totalAssigned}</b>
+                      </span>
+                    )}
                   </div>
-                </div>
 
-                <div className="assignment-row">
-                  {participants.map((participant) => {
-                    const selectedQuantity =
-                      item.assignments[participant.id] ?? 0;
-                    return (
-                      <button
-                        className={`assignment-cell ${
-                          selectedQuantity > 0 ? "selected" : ""
-                        }`}
-                        type="button"
-                        key={participant.id}
-                        onClick={() =>
-                          updateAssignment(item.id, participant.id)
-                        }
-                        aria-label={`${participant.name}: ${
-                          item.shared
-                            ? selectedQuantity
-                              ? "incluido"
-                              : "no incluido"
-                            : `${selectedQuantity} unidades`
-                        }`}
-                      >
-                        <span className="mini-avatar">
-                          {participant.name.slice(0, 1)}
-                        </span>
-                        <span className="assignment-name">
-                          {participant.name}
-                        </span>
-                        <span className="assignment-value">
-                          {item.shared
-                            ? selectedQuantity
-                              ? "✓"
-                              : "—"
-                            : selectedQuantity || "—"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="item-footer">
-                  <label className="share-toggle">
+                  <label className="share-control">
+                    <span>
+                      <strong>Compartir</strong>
+                      <small>Divide el valor entre los seleccionados</small>
+                    </span>
                     <input
                       type="checkbox"
                       checked={item.shared}
                       onChange={() => toggleShared(item.id)}
                     />
-                    <span className="toggle-track" aria-hidden="true">
-                      <span />
-                    </span>
-                    Compartir este consumo
+                    <i aria-hidden="true" />
                   </label>
-                  <small>
-                    {item.shared
-                      ? "El monto se divide entre las personas marcadas"
-                      : `Quedan ${Math.max(
-                          item.quantity - itemAssigned,
-                          0,
-                        )} unidades`}
-                  </small>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
+                </article>
+              );
+            })}
+          </div>
 
-      <section className="totals-card">
-        <div>
-          <p className="eyebrow">Paso 3</p>
-          <h2>Propina y total</h2>
-        </div>
-        <div className="tip-options" aria-label="Porcentaje de propina">
-          {[0, 10, 15].map((percent) => (
-            <button
-              type="button"
-              className={tipPercent === percent ? "active" : ""}
-              key={percent}
-              onClick={() => setTipPercent(percent)}
-            >
-              {percent}%
-            </button>
-          ))}
-          <label>
-            Otro
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={tipPercent}
-              onChange={(event) =>
-                setTipPercent(Math.max(0, Number(event.target.value)))
-              }
-            />
-            %
-          </label>
-        </div>
-        <div className="totals-lines">
-          <span>Consumo <strong>{formatCurrency(billSubtotal)}</strong></span>
-          <span>Propina proporcional <strong>{formatCurrency(tipAmount)}</strong></span>
-          <span className="grand-total">
-            Total pagado <strong>{formatCurrency(grandTotal)}</strong>
-          </span>
-        </div>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={!allAssigned}
-          onClick={() => setShowSummary(true)}
-        >
-          {allAssigned ? "Revisar división" : "Completa los consumos pendientes"}
-          <span aria-hidden="true">→</span>
-        </button>
-      </section>
-
-      {showSummary && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setShowSummary(false);
-            }
-          }}
-        >
-          <section
-            className="summary-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="summary-title"
-          >
-            <div className="summary-handle" />
-            <div className="summary-header">
-              <div>
-                <p className="eyebrow">Todo cuadra</p>
-                <h2 id="summary-title">Resumen para el grupo</h2>
-              </div>
-              <button
-                type="button"
-                className="close-button"
-                onClick={() => setShowSummary(false)}
-                aria-label="Cerrar resumen"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="payer-summary">
-              <span>Pagó la cuenta</span>
-              <strong>
-                {participants.find((person) => person.id === payerId)?.name}
-              </strong>
-              <b>{formatCurrency(grandTotal)}</b>
-            </div>
-
-            <div className="transfer-list">
-              {participants.map((participant) => (
-                <div
-                  className={`transfer-row ${
-                    participant.id === payerId ? "payer-row" : ""
-                  }`}
-                  key={participant.id}
+          <div className="tip-panel">
+            <span>
+              <small>Propina</small>
+              <strong>{formatCurrency(tipAmount)}</strong>
+            </span>
+            <div>
+              {[0, 10, 15].map((percent) => (
+                <button
+                  type="button"
+                  className={tipPercent === percent ? "selected" : ""}
+                  key={percent}
+                  onClick={() => setTipPercent(percent)}
                 >
-                  <span className="avatar">{participant.name.slice(0, 1)}</span>
-                  <div>
-                    <strong>{participant.name}</strong>
-                    <small>
-                      Consumo {formatCurrency(subtotals[participant.id] ?? 0)} ·
-                      Propina{" "}
-                      {formatCurrency(tipAllocations[participant.id] ?? 0)}
-                    </small>
-                  </div>
-                  <span className="transfer-amount">
-                    {participant.id === payerId
-                      ? "Parte propia"
-                      : "Transfiere"}
-                    <strong>
-                      {formatCurrency(participantTotals[participant.id] ?? 0)}
-                    </strong>
-                  </span>
-                </div>
+                  {percent}%
+                </button>
               ))}
             </div>
+          </div>
 
-            <div className="summary-check">
-              <span aria-hidden="true">✓</span>
+          <div className="assignment-footer">
+            <span className={allAssigned ? "ready" : ""}>
+              {allAssigned ? "✓ Todo asignado" : `⚠ ${totalUnits - assignedUnits} unidad pendiente`}
+            </span>
+            <strong>{formatCurrency(grandTotal)} total</strong>
+            <button
+              className="primary-action"
+              disabled={!allAssigned}
+              onClick={() => setStep("summary")}
+            >
+              Continuar <span>→</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === "summary" && (
+        <section className="screen summary-screen">
+          <ScreenTitle
+            title="Resumen de la cuenta"
+            description="Todo listo. Aquí tienes el desglose final."
+          />
+
+          <article className="final-total-card">
+            <span>
+              <small>Total final</small>
+              <strong>{formatCurrency(grandTotal)}</strong>
+            </span>
+            <div>
               <p>
-                <strong>{formatCurrency(grandTotal)} distribuidos</strong>
-                <small>La suma coincide con el total pagado.</small>
+                <small>Subtotal</small>
+                <b>{formatCurrency(billSubtotal)}</b>
+              </p>
+              <p>
+                <small>Propina ({tipPercent}%)</small>
+                <b>{formatCurrency(tipAmount)}</b>
               </p>
             </div>
+          </article>
 
-            <button
-              className="primary-button whatsapp-button"
-              type="button"
-              onClick={shareSummary}
-            >
-              Compartir cuenta y resumen
-              <span aria-hidden="true">↗</span>
-            </button>
-            {shareStatus && <p className="share-status">{shareStatus}</p>}
-            <button className="delete-button" type="button" onClick={clearSession}>
-              Finalizar y eliminar sesión
-            </button>
-          </section>
-        </div>
+          <p className="section-label">Participantes</p>
+          <div className="summary-list">
+            {participants.map((participant) => (
+              <article
+                className={`summary-person ${
+                  participant.id === payerId ? "payer-summary" : ""
+                }`}
+                key={participant.id}
+              >
+                <ParticipantAvatar participant={participant} />
+                <span>
+                  <strong>{participant.name}</strong>
+                  <small>
+                    {participant.id === payerId ? "Parte propia" : "Transfiere"}
+                  </small>
+                </span>
+                <b>{formatCurrency(participantTotals[participant.id] ?? 0)}</b>
+              </article>
+            ))}
+          </div>
+
+          <div className="distributed-check">
+            <span>✓</span> Total distribuido: {formatCurrency(grandTotal)}
+          </div>
+
+          <button className="primary-action share-action" onClick={shareSummary}>
+            ↗ Compartir resumen
+          </button>
+          {shareStatus && <p className="share-status">{shareStatus}</p>}
+          <button className="delete-action" onClick={deleteSession}>
+            ⊗ Finalizar y eliminar sesión
+          </button>
+        </section>
+      )}
+
+      <BottomNavigation
+        step={step}
+        canSummarize={allAssigned}
+        onNavigate={setStep}
+      />
+      {usingDemo && step !== "capture" && (
+        <span className="demo-badge">Cuenta de ejemplo</span>
       )}
     </main>
   );
+}
+
+function AppHeader({
+  step,
+  onBack,
+}: {
+  step: Step;
+  onBack: () => void;
+}) {
+  return (
+    <header className="app-header">
+      <button
+        type="button"
+        className={step === "capture" ? "brand-button" : "back-button"}
+        onClick={step === "capture" ? undefined : onBack}
+        aria-label={step === "capture" ? "La Justa" : "Volver"}
+      >
+        {step === "capture" ? "◴" : "←"}
+      </button>
+      <strong>La Justa</strong>
+      <button type="button" className="menu-button" aria-label="Más opciones">
+        ⋮
+      </button>
+    </header>
+  );
+}
+
+function ScreenTitle({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="screen-title">
+      <h1>{title}</h1>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function ParticipantAvatar({ participant }: { participant: Participant }) {
+  return (
+    <span className={`participant-avatar ${participant.tone}`}>
+      {participant.name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+function BottomNavigation({
+  step,
+  canSummarize,
+  onNavigate,
+}: {
+  step: Step;
+  canSummarize: boolean;
+  onNavigate: (step: Step) => void;
+}) {
+  const items: Array<{ step: Step; icon: string; label: string }> = [
+    { step: "capture", icon: "▣", label: "Cuenta" },
+    { step: "people", icon: "♙", label: "Personas" },
+    { step: "assign", icon: "▤", label: "Consumos" },
+    { step: "summary", icon: "▧", label: "Resumen" },
+  ];
+
+  return (
+    <nav className="bottom-navigation" aria-label="Pasos">
+      {items.map((item) => (
+        <button
+          type="button"
+          key={item.step}
+          className={step === item.step ? "active" : ""}
+          disabled={item.step === "summary" && !canSummarize}
+          onClick={() => onNavigate(item.step)}
+          aria-label={item.label}
+        >
+          <span>{item.icon}</span>
+          <small>{item.label}</small>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function previousStep(step: Step): Step {
+  if (step === "summary") return "assign";
+  if (step === "assign") return "people";
+  return "capture";
 }
