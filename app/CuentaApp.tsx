@@ -1,23 +1,17 @@
 "use client";
 
 import { ChangeEvent, useMemo, useRef, useState } from "react";
+import {
+  calculateBillDistribution,
+  isItemFullyAssigned,
+} from "../domain/billing";
+import type {
+  BillItem,
+  Participant,
+  ParticipantTone,
+} from "../domain/models";
 
 type Step = "capture" | "people" | "assign" | "summary";
-
-type Participant = {
-  id: string;
-  name: string;
-  tone: "mint" | "lavender" | "blue" | "peach";
-};
-
-type BillItem = {
-  id: string;
-  name: string;
-  quantity: number;
-  total: number;
-  shared: boolean;
-  assignments: Record<string, number>;
-};
 
 const INITIAL_PARTICIPANTS: Participant[] = [
   { id: "pedro", name: "Pedro", tone: "mint" },
@@ -61,7 +55,7 @@ const INITIAL_ITEMS: BillItem[] = [
   },
 ];
 
-const TONES: Participant["tone"][] = ["mint", "lavender", "blue", "peach"];
+const TONES: ParticipantTone[] = ["mint", "lavender", "blue", "peach"];
 
 const currencyFormatter = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -71,75 +65,6 @@ const currencyFormatter = new Intl.NumberFormat("es-CL", {
 
 function formatCurrency(value: number): string {
   return currencyFormatter.format(value);
-}
-
-/**
- * Distribuye pesos enteros por peso relativo y entrega los residuos de forma
- * determinista para que la suma nunca difiera del total original.
- *
- * @param total Monto total en pesos chilenos.
- * @param weights Peso relativo de cada participante.
- * @returns Montos enteros reconciliados por participante.
- */
-function allocateAmount(
-  total: number,
-  weights: Record<string, number>,
-): Record<string, number> {
-  const entries = Object.entries(weights).filter(([, weight]) => weight > 0);
-  const totalWeight = entries.reduce((sum, [, weight]) => sum + weight, 0);
-
-  if (totalWeight === 0) {
-    return {};
-  }
-
-  const allocations = entries.map(([id, weight]) => {
-    const exactValue = (total * weight) / totalWeight;
-    const value = Math.floor(exactValue);
-    return { id, value, remainder: exactValue - value };
-  });
-
-  let remaining =
-    total - allocations.reduce((sum, allocation) => sum + allocation.value, 0);
-
-  allocations.sort(
-    (first, second) =>
-      second.remainder - first.remainder || first.id.localeCompare(second.id),
-  );
-
-  for (let index = 0; index < allocations.length && remaining > 0; index += 1) {
-    allocations[index].value += 1;
-    remaining -= 1;
-  }
-
-  return Object.fromEntries(
-    allocations.map(({ id, value }) => [id, value]),
-  );
-}
-
-function calculateSubtotals(
-  participants: Participant[],
-  items: BillItem[],
-): Record<string, number> {
-  const subtotals = Object.fromEntries(
-    participants.map((participant) => [participant.id, 0]),
-  );
-
-  for (const item of items) {
-    const weights = item.shared
-      ? Object.fromEntries(
-          Object.entries(item.assignments)
-            .filter(([, selected]) => selected > 0)
-            .map(([participantId]) => [participantId, 1]),
-        )
-      : item.assignments;
-
-    const allocations = allocateAmount(item.total, weights);
-    for (const [participantId, amount] of Object.entries(allocations)) {
-      subtotals[participantId] = (subtotals[participantId] ?? 0) + amount;
-    }
-  }
-
-  return subtotals;
 }
 
 export function CuentaApp() {
@@ -157,27 +82,18 @@ export function CuentaApp() {
   const [sessionDeleted, setSessionDeleted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const billSubtotal = useMemo(
-    () => items.reduce((sum, item) => sum + item.total, 0),
-    [items],
+  const billSubtotal = items.reduce((sum, item) => sum + item.total, 0);
+  const allAssigned = items.every(isItemFullyAssigned);
+  const distribution = useMemo(
+    () =>
+      allAssigned && participants.length > 0
+        ? calculateBillDistribution(participants, items, tipPercent)
+        : null,
+    [allAssigned, items, participants, tipPercent],
   );
-  const tipAmount = Math.round((billSubtotal * tipPercent) / 100);
-  const grandTotal = billSubtotal + tipAmount;
-  const subtotals = useMemo(
-    () => calculateSubtotals(participants, items),
-    [participants, items],
-  );
-  const tipAllocations = useMemo(
-    () => allocateAmount(tipAmount, subtotals),
-    [tipAmount, subtotals],
-  );
-  const participantTotals = Object.fromEntries(
-    participants.map((participant) => [
-      participant.id,
-      (subtotals[participant.id] ?? 0) +
-        (tipAllocations[participant.id] ?? 0),
-    ]),
-  );
+  const tipAmount = distribution?.tip ?? Math.round((billSubtotal * tipPercent) / 100);
+  const grandTotal = distribution?.grandTotal ?? billSubtotal + tipAmount;
+  const participantTotals = distribution?.totals ?? {};
 
   const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
   const assignedUnits = items.reduce((sum, item) => {
@@ -197,12 +113,6 @@ export function CuentaApp() {
       )
     );
   }, 0);
-  const allAssigned = items.every((item) => {
-    const assigned = Object.values(item.assignments);
-    return item.shared
-      ? assigned.filter(Boolean).length >= 2
-      : assigned.reduce((sum, quantity) => sum + quantity, 0) === item.quantity;
-  });
 
   function handleBillImage(event: ChangeEvent<HTMLInputElement>) {
     const [file] = Array.from(event.target.files ?? []);
