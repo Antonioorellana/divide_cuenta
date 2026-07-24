@@ -10,9 +10,18 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "La Justa",
+  applicationName: "La Justa",
   description:
     "Divide una cuenta entre amigos, asigna consumos y comparte el resumen.",
   manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "La Justa",
+  },
+  formatDetection: {
+    telephone: false,
+  },
   openGraph: {
     title: "La Justa · Divide. Comparte. Listo.",
     description: "La forma más rápida de dividir una cuenta entre amigos.",
