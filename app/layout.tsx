@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { PwaRegistration } from "./PwaRegistration";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
+const deploymentHost =
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ??
+  process.env.VERCEL_URL ??
+  "la-justa-cuentas.neoevil05.chatgpt.site";
+const metadataBase = new URL(
+  deploymentHost.startsWith("http")
+    ? deploymentHost
+    : `https://${deploymentHost}`,
+);
 
 export const metadata: Metadata = {
+  metadataBase,
   title: "La Justa",
   applicationName: "La Justa",
   description:
@@ -54,7 +59,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className={`${inter.variable} antialiased`}>
+      <body>
         {children}
         <PwaRegistration />
       </body>

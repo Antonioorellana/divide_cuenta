@@ -26,6 +26,9 @@
 html {
   min-height: 100%;
   background: #eceae4;
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -37,12 +40,23 @@ body {
     radial-gradient(circle at 82% 24%, rgba(243, 229, 245, 0.62), transparent 24rem),
     #eceae4;
   color: var(--ink);
-  font-family: var(--font-inter), Inter, Arial, sans-serif;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 button,
 input {
   font: inherit;
+  font-size: 1rem !important;
 }
 
 button {
@@ -126,7 +140,7 @@ button {
 .screen {
   min-height: calc(100vh - 58px);
   min-height: calc(100dvh - 58px);
-  padding: 26px 18px calc(116px + env(safe-area-inset-bottom));
+  padding: 26px 18px calc(128px + env(safe-area-inset-bottom));
 }
 
 .capture-screen {
@@ -933,7 +947,7 @@ button {
   position: fixed;
   z-index: 15;
   right: max(0px, calc((100vw - 480px) / 2));
-  bottom: calc(64px + env(safe-area-inset-bottom));
+  bottom: calc(76px + env(safe-area-inset-bottom));
   left: max(0px, calc((100vw - 480px) / 2));
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1118,7 +1132,7 @@ button {
   left: max(0px, calc((100vw - 480px) / 2));
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  min-height: calc(64px + env(safe-area-inset-bottom));
+  min-height: calc(76px + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid rgba(113, 121, 116, 0.14);
   background: rgba(253, 252, 248, 0.9);
@@ -1127,8 +1141,10 @@ button {
 
 .bottom-navigation button {
   display: grid;
+  min-width: 0;
+  min-height: 68px;
   place-content: center;
-  gap: 3px;
+  gap: 4px;
   border: 0;
   background: transparent;
   color: #66716b;
@@ -1137,8 +1153,8 @@ button {
 
 .bottom-navigation button span {
   display: grid;
-  width: 31px;
-  height: 27px;
+  width: 36px;
+  height: 32px;
   margin: 0 auto;
   place-items: center;
   border-radius: 999px;
@@ -1147,7 +1163,8 @@ button {
 .bottom-navigation button small {
   max-width: 64px;
   overflow: hidden;
-  font-size: 7px;
+  font-size: 0.75rem !important;
+  line-height: 1.2;
   text-overflow: ellipsis;
 }
 
@@ -1235,7 +1252,7 @@ button {
   .bottom-navigation {
     right: calc((100vw - 480px) / 2);
     bottom: 16px;
-    min-height: 64px;
+    min-height: 76px;
     padding-bottom: 0;
     left: calc((100vw - 480px) / 2);
     border-radius: 0 0 32px 32px;
@@ -1243,9 +1260,81 @@ button {
 
   .assignment-footer {
     right: calc((100vw - 480px) / 2);
-    bottom: 80px;
+    bottom: 92px;
     left: calc((100vw - 480px) / 2);
   }
+}
+
+/* Escala mínima legible y compatible con el tamaño de texto del dispositivo. */
+small {
+  font-size: 0.8125rem !important;
+  line-height: 1.35;
+}
+
+.app-header strong,
+.feature-grid strong,
+.participant-info strong,
+.summary-person span strong {
+  font-size: 1rem;
+}
+
+.hero-copy p,
+.screen-title p,
+.feature-grid p,
+.iphone-install-note p,
+.muted {
+  font-size: 0.9375rem !important;
+  line-height: 1.55;
+}
+
+.pilot-badge,
+.status-complete,
+.status-pending,
+.form-error,
+.demo-badge,
+.assignment-footer > span,
+.distributed-check,
+.privacy-before-share,
+.share-status,
+.section-label {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.screen-title h1 {
+  font-size: 2rem;
+}
+
+.primary-action {
+  min-height: 56px;
+}
+
+.item-editor-card input,
+.new-item-card input,
+.add-person-field input {
+  min-height: 48px;
+  font-size: 1rem !important;
+}
+
+.consumption-heading strong,
+.share-control strong,
+.bill-subtotal,
+.final-total-card p b,
+.summary-person > b {
+  font-size: 0.9375rem;
+}
+
+.assignment-footer > strong,
+.tip-panel span strong {
+  font-size: 1rem;
+}
+
+.empty-state,
+.share-control small,
+.tip-panel span small,
+.final-total-card small,
+.summary-person span small {
+  font-size: 0.8125rem !important;
 }
 
 @media (max-width: 390px) {

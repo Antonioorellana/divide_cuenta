@@ -54,3 +54,6 @@ npm test
 
 Las decisiones técnicas y las siguientes fases están documentadas en
 [`docs/architecture.md`](docs/architecture.md).
+
+El flujo de ramas, pruebas automáticas, acceso SSH y despliegues está
+documentado en [`docs/development-workflow.md`](docs/development-workflow.md).
