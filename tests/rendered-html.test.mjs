@@ -51,6 +51,7 @@ test("publica metadatos de una PWA instalable", async () => {
   assert.equal(parsedManifest.display, "standalone");
   assert.equal(parsedManifest.lang, "es-CL");
   assert.equal(parsedManifest.icons.length, 2);
-  assert.match(serviceWorker, /la-justa-v3/);
+  assert.match(serviceWorker, /la-justa-v4/);
+  assert.match(serviceWorker, /icon-180\.png/);
   assert.match(serviceWorker, /Sin conexión/);
 });
