@@ -33,6 +33,10 @@ test("renderiza la aplicación La Justa", async () => {
   assert.match(html, /Divide\./);
   assert.match(html, /Fotografiar cuenta/);
   assert.match(html, /Privada por diseño/);
+  assert.match(
+    html,
+    /Desarrollado por(?:\s*<!-- -->)?\s*<strong>Orvedevs<\/strong>/,
+  );
   assert.doesNotMatch(html, /Your site is taking shape|codex-preview/i);
 });
 

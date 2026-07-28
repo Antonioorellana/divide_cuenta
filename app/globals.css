@@ -147,6 +147,19 @@ button {
   padding-top: 24px;
 }
 
+.developer-credit {
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
+.developer-credit strong {
+  color: var(--primary-deep);
+  font-weight: 700;
+}
+
 .hero-copy {
   padding: 0 12px;
   text-align: center;

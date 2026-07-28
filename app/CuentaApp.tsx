@@ -679,6 +679,10 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
               <p>Usa alias temporales y elimina todo al compartir.</p>
             </article>
           </div>
+
+          <p className="developer-credit">
+            Desarrollado por <strong>Orvedevs</strong>
+          </p>
         </section>
       )}
 
