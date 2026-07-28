@@ -1,18 +1,32 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { PwaRegistration } from "./PwaRegistration";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
+const deploymentHost =
+  process.env.VERCEL_PROJECT_PRODUCTION_URL ??
+  process.env.VERCEL_URL ??
+  "la-justa-cuentas.neoevil05.chatgpt.site";
+const metadataBase = new URL(
+  deploymentHost.startsWith("http")
+    ? deploymentHost
+    : `https://${deploymentHost}`,
+);
 
 export const metadata: Metadata = {
+  metadataBase,
   title: "La Justa",
+  applicationName: "La Justa",
   description:
     "Divide una cuenta entre amigos, asigna consumos y comparte el resumen.",
   manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "La Justa",
+  },
+  formatDetection: {
+    telephone: false,
+  },
   openGraph: {
     title: "La Justa · Divide. Comparte. Listo.",
     description: "La forma más rápida de dividir una cuenta entre amigos.",
@@ -27,7 +41,7 @@ export const metadata: Metadata = {
   icons: {
     icon: "/icon-192.png",
     shortcut: "/icon-192.png",
-    apple: "/icon-192.png",
+    apple: "/icon-180.png",
   },
 };
 
@@ -45,7 +59,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className={`${inter.variable} antialiased`}>
+      <body>
         {children}
         <PwaRegistration />
       </body>

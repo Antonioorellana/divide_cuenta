@@ -1,0 +1,45 @@
+name: Calidad
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Pruebas, lint y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Probar reglas financieras
+        run: npm run test:domain
+
+      - name: Revisar calidad estática
+        run: npm run lint
+
+      - name: Compilar y probar la aplicación
+        run: npm test
+
+      - name: Verificar build para Vercel
+        run: npm run build:vercel
