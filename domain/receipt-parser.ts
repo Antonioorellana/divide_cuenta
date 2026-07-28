@@ -29,7 +29,10 @@ const SUMMARY_WORDS = [
 ];
 
 const MONEY_AT_END =
-  /(?:\$\s*)?(\d{1,3}(?:[.,\s]\d{3})+|\d{3,8})(?:\s*(?:clp|pesos?))?\s*$/i;
+  /(?:\$\s*)?(\d{1,3}(?:(?:[.,]\s*|\s)\d{3})+|\d{3,8})(?:\s*(?:clp|pesos?))?\s*$/i;
+const MONEY_ONLY = new RegExp(`^${MONEY_AT_END.source}`, "i");
+const QUANTITY_PREFIX =
+  /^[^\p{L}\d]{0,3}([1-9]\d?)(?:[.,]0{1,2})?\s*(?:[xX*]\s*)?(.+)$/u;
 
 /**
  * Convierte un monto chileno reconocido por OCR a pesos enteros.
@@ -62,10 +65,47 @@ function containsSummaryWord(line: string): boolean {
 function cleanItemName(value: string): string {
   return value
     .replace(/\b(?:cant(?:idad)?|precio|valor|unit(?:ario)?)\b/gi, " ")
-    .replace(/(?:\$\s*)?\d{1,3}(?:[.,\s]\d{3})+(?=\s|$)/g, " ")
+    .replace(
+      /(?:\$\s*)?\d{1,3}(?:(?:[.,]\s*|\s)\d{3})+(?=\s|$)/g,
+      " ",
+    )
     .replace(/^[#.:;,\-\s]+|[#.:;,\-\s]+$/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function normalizeOcrLine(value: string): string {
+  return value
+    .replace(/[|¦]/g, "I")
+    .replace(/^[^\p{L}\d]{1,3}(?=\s*[1Il][.,]0{2}\s)/u, "")
+    .replace(/^[Il](?=[.,]0{2}\s)/, "1")
+    .replace(/(\d)[.,]\s+(\d{3})(?=\D*$)/, "$1.$2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function mergeDetachedPrices(lines: string[]): string[] {
+  const mergedLines: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const nextLine = lines[index + 1];
+
+    if (
+      QUANTITY_PREFIX.test(line) &&
+      !MONEY_AT_END.test(line) &&
+      nextLine &&
+      MONEY_ONLY.test(nextLine)
+    ) {
+      mergedLines.push(`${line} ${nextLine}`);
+      index += 1;
+      continue;
+    }
+
+    mergedLines.push(line);
+  }
+
+  return mergedLines;
 }
 
 function findDeclaredTotal(lines: string[]): number | null {
@@ -108,11 +148,13 @@ function findDeclaredSubtotal(lines: string[]): number | null {
  * @returns Borrador de consumos, líneas omitidas y advertencias de conciliación.
  */
 export function parseReceiptText(rawText: string): ReceiptParseResult {
-  const lines = rawText
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.replace(/[|¦]/g, "I").replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+  const lines = mergeDetachedPrices(
+    rawText
+      .replace(/\r/g, "")
+      .split("\n")
+      .map(normalizeOcrLine)
+      .filter(Boolean),
+  );
 
   const declaredTotal = findDeclaredTotal(lines);
   const declaredSubtotal = findDeclaredSubtotal(lines);
@@ -134,7 +176,7 @@ export function parseReceiptText(rawText: string): ReceiptParseResult {
 
     let itemText = line.slice(0, moneyMatch.index).trim();
     let quantity = 1;
-    const quantityMatch = itemText.match(/^(\d{1,2})\s*(?:[xX*]\s*)?(.+)$/);
+    const quantityMatch = itemText.match(QUANTITY_PREFIX);
 
     if (quantityMatch) {
       const parsedQuantity = Number(quantityMatch[1]);

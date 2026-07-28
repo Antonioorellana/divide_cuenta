@@ -59,6 +59,43 @@ describe("parseReceiptText", () => {
     assert.equal(result.warnings.length, 0);
   });
 
+  it("interpreta una comanda real con cantidades decimales y luz baja", () => {
+    const result = parseReceiptText(`
+      cant. Detalle                valor
+      1.00 JACK DANIELS HONEY       8.000
+      1.00 MISTRAL 35           5. 500
+      1.00 MOJITO MALIBU            6.000
+      1.00 TABLA LATORRE           29.000
+      1.00 CUSQUENA                   3.500
+      1.00 VASO MICHELADO             1.000
+      1.00 JACK DANIELS HONEY
+      8.000
+      1,00 SQUIRT                   6.500
+      TOTAL COMANDA        67.500
+      TOTAL A PAGAR     67.500
+    `);
+
+    assert.deepEqual(
+      result.items.map(({ name, quantity, total }) => ({
+        name,
+        quantity,
+        total,
+      })),
+      [
+        { name: "JACK DANIELS HONEY", quantity: 1, total: 8000 },
+        { name: "MISTRAL 35", quantity: 1, total: 5500 },
+        { name: "MOJITO MALIBU", quantity: 1, total: 6000 },
+        { name: "TABLA LATORRE", quantity: 1, total: 29000 },
+        { name: "CUSQUENA", quantity: 1, total: 3500 },
+        { name: "VASO MICHELADO", quantity: 1, total: 1000 },
+        { name: "JACK DANIELS HONEY", quantity: 1, total: 8000 },
+        { name: "SQUIRT", quantity: 1, total: 6500 },
+      ],
+    );
+    assert.equal(result.declaredTotal, 67500);
+    assert.equal(result.warnings.length, 0);
+  });
+
   it("informa cuando no encuentra líneas suficientemente confiables", () => {
     const result = parseReceiptText("MESA 12\nGRACIAS POR SU VISITA");
 

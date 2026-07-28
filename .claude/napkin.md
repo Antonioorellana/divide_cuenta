@@ -15,11 +15,13 @@
    Do instead: keep `vinext build` for Sites and `next build` for Vercel; verify both whenever client-only dependencies change.
 
 ## Domain Behavior Guardrails
-1. **[2026-07-27] Keep receipt processing ephemeral and on-device**
+1. **[2026-07-27] Optimize real comandas before OCR**
+   Do instead: upscale small photos by at most 2x, normalize grayscale by histogram percentiles, preserve rows with Tesseract single-block mode, and test against low-light green-tinted receipts with decimal quantities.
+2. **[2026-07-27] Keep receipt processing ephemeral and on-device**
    Do instead: process receipt images in the browser, retain no server copy, and clear derived data when the user deletes the account.
-2. **[2026-07-27] Treat OCR output as untrusted input**
+3. **[2026-07-27] Treat OCR output as untrusted input**
    Do instead: parse conservatively and require users to review names, quantities, and prices before assigning consumption.
-3. **[2026-07-27] Preserve proportional tip allocation**
+4. **[2026-07-27] Preserve proportional tip allocation**
    Do instead: calculate each attendee's tip from their consumption subtotal and reconcile rounding without changing the final paid total.
 
 ## Source Control & Publishing

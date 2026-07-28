@@ -1,5 +1,8 @@
-const MAX_OCR_DIMENSION = 2200;
-const MIN_OCR_DIMENSION = 1400;
+const MAX_OCR_DIMENSION = 2400;
+const MIN_OCR_DIMENSION = 1800;
+const MAX_UPSCALE = 2;
+const NORMALIZATION_LOW_PERCENTILE = 0.01;
+const NORMALIZATION_HIGH_PERCENTILE = 0.99;
 
 export type OcrProgress = {
   progress: number;
@@ -56,7 +59,10 @@ async function prepareReceiptImage(file: File): Promise<Blob> {
       longestSide > MAX_OCR_DIMENSION
         ? MAX_OCR_DIMENSION / longestSide
         : longestSide < MIN_OCR_DIMENSION
-          ? Math.min(2, MIN_OCR_DIMENSION / Math.max(longestSide, 1))
+          ? Math.min(
+              MAX_UPSCALE,
+              MIN_OCR_DIMENSION / Math.max(longestSide, 1),
+            )
           : 1;
 
     const canvas = document.createElement("canvas");
@@ -71,16 +77,53 @@ async function prepareReceiptImage(file: File): Promise<Blob> {
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
     const pixels = imageData.data;
+    const histogram = new Uint32Array(256);
+    const pixelCount = pixels.length / 4;
 
     for (let index = 0; index < pixels.length; index += 4) {
-      const grey =
+      const grey = Math.round(
         pixels[index] * 0.299 +
-        pixels[index + 1] * 0.587 +
-        pixels[index + 2] * 0.114;
-      const contrasted = Math.max(0, Math.min(255, (grey - 128) * 1.35 + 128));
-      pixels[index] = contrasted;
-      pixels[index + 1] = contrasted;
-      pixels[index + 2] = contrasted;
+          pixels[index + 1] * 0.587 +
+          pixels[index + 2] * 0.114,
+      );
+      histogram[grey] += 1;
+      pixels[index] = grey;
+      pixels[index + 1] = grey;
+      pixels[index + 2] = grey;
+    }
+
+    const lowTarget = pixelCount * NORMALIZATION_LOW_PERCENTILE;
+    const highTarget = pixelCount * NORMALIZATION_HIGH_PERCENTILE;
+    let cumulative = 0;
+    let low = 0;
+    let high = 255;
+
+    for (let value = 0; value < histogram.length; value += 1) {
+      cumulative += histogram[value];
+      if (cumulative >= lowTarget) {
+        low = value;
+        break;
+      }
+    }
+
+    cumulative = 0;
+    for (let value = 0; value < histogram.length; value += 1) {
+      cumulative += histogram[value];
+      if (cumulative >= highTarget) {
+        high = value;
+        break;
+      }
+    }
+
+    const range = Math.max(1, high - low);
+    for (let index = 0; index < pixels.length; index += 4) {
+      const normalized = Math.max(
+        0,
+        Math.min(255, ((pixels[index] - low) * 255) / range),
+      );
+      pixels[index] = normalized;
+      pixels[index + 1] = normalized;
+      pixels[index + 2] = normalized;
     }
 
     context.putImageData(imageData, 0, 0);
@@ -119,7 +162,7 @@ export async function recognizeReceipt(
         }),
     });
     await worker.setParameters({
-      tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
       preserve_interword_spaces: "1",
       user_defined_dpi: "300",
     });
