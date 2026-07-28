@@ -1,4 +1,4 @@
-const CACHE_NAME = "la-justa-v2";
+const CACHE_NAME = "la-justa-v3";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",

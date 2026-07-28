@@ -6,13 +6,16 @@ import {
   calculateBillDistribution,
   isItemFullyAssigned,
 } from "../domain/billing";
+import { parseReceiptText } from "../domain/receipt-parser";
 import type {
   BillItem,
   Participant,
   ParticipantTone,
 } from "../domain/models";
+import { recognizeReceipt } from "./receipt-ocr";
 
 type Step = "capture" | "items" | "people" | "assign" | "summary";
+type ScanState = "idle" | "processing" | "success" | "error";
 
 const DEMO_PARTICIPANTS: Participant[] = [
   { id: "pedro", name: "Pedro", tone: "mint" },
@@ -59,6 +62,7 @@ const DEMO_ITEMS: BillItem[] = [
 const TONES: ParticipantTone[] = ["mint", "lavender", "blue", "peach"];
 const MAX_PARTICIPANTS = 20;
 const MAX_ITEMS = 60;
+const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 
 const currencyFormatter = new Intl.NumberFormat("es-CL", {
   style: "currency",
@@ -76,6 +80,18 @@ function createId(prefix: string): string {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${suffix}`;
+}
+
+function describeOcrStatus(status: string): string {
+  const descriptions: Record<string, string> = {
+    "loading tesseract core": "Preparando el lector",
+    "initializing tesseract": "Iniciando el lector",
+    "loading language traineddata": "Cargando español",
+    "initializing api": "Ajustando el reconocimiento",
+    "recognizing text": "Leyendo consumos y precios",
+  };
+
+  return descriptions[status] ?? "Analizando la boleta";
 }
 
 /**
@@ -100,12 +116,19 @@ export function CuentaApp() {
   const [billImage, setBillImage] = useState<File | null>(null);
   const [billImageUrl, setBillImageUrl] = useState<string | null>(null);
   const [usingDemo, setUsingDemo] = useState(false);
+  const [scanState, setScanState] = useState<ScanState>("idle");
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanMessage, setScanMessage] = useState("");
+  const [scanWarnings, setScanWarnings] = useState<string[]>([]);
+  const [ignoredLineCount, setIgnoredLineCount] = useState(0);
   const [shareStatus, setShareStatus] = useState("");
   const [sessionDeleted, setSessionDeleted] = useState(false);
   const [sessionResult, setSessionResult] = useState<"shared" | "deleted">(
     "deleted",
   );
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const scanSequenceRef = useRef(0);
 
   useEffect(() => {
     if (!billImageUrl) {
@@ -168,19 +191,92 @@ export function CuentaApp() {
     setShareStatus("");
   }
 
+  function resetScanState() {
+    setScanState("idle");
+    setScanProgress(0);
+    setScanMessage("");
+    setScanWarnings([]);
+    setIgnoredLineCount(0);
+  }
+
+  async function scanBillImage(file: File) {
+    if (!file.type.startsWith("image/")) {
+      setScanState("error");
+      setScanMessage("Elige una fotografía en formato de imagen.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      setScanState("error");
+      setScanMessage("La fotografía supera 20 MB. Elige una versión más liviana.");
+      return;
+    }
+
+    const scanSequence = scanSequenceRef.current + 1;
+    scanSequenceRef.current = scanSequence;
+    resetWorkingData();
+    resetScanState();
+    setStep("capture");
+    setBillImage(file);
+    setBillImageUrl(URL.createObjectURL(file));
+    setUsingDemo(false);
+    setScanState("processing");
+    setScanMessage("Preparando la fotografía");
+
+    try {
+      const recognizedText = await recognizeReceipt(file, (progress) => {
+        if (scanSequenceRef.current !== scanSequence) {
+          return;
+        }
+        setScanProgress(progress.progress);
+        setScanMessage(describeOcrStatus(progress.status));
+      });
+      const parsedReceipt = parseReceiptText(recognizedText);
+
+      if (scanSequenceRef.current !== scanSequence) {
+        return;
+      }
+
+      setItems(parsedReceipt.items.slice(0, MAX_ITEMS));
+      setIgnoredLineCount(parsedReceipt.ignoredLineCount);
+      setScanWarnings(parsedReceipt.warnings);
+      setScanProgress(1);
+
+      if (parsedReceipt.items.length === 0) {
+        setScanState("error");
+        setScanMessage("No encontramos consumos confiables en esta foto.");
+        return;
+      }
+
+      setScanState("success");
+      setScanMessage(
+        `${Math.min(parsedReceipt.items.length, MAX_ITEMS)} consumos detectados`,
+      );
+      setStep("items");
+    } catch {
+      if (scanSequenceRef.current !== scanSequence) {
+        return;
+      }
+      setScanState("error");
+      setScanMessage(
+        "No pudimos leer esta foto. Reintenta con la boleta recta, completa y bien iluminada.",
+      );
+      setScanWarnings([]);
+      setIgnoredLineCount(0);
+    }
+  }
+
   function handleBillImage(event: ChangeEvent<HTMLInputElement>) {
     const [file] = Array.from(event.target.files ?? []);
+    event.target.value = "";
     if (!file) {
       return;
     }
 
-    resetWorkingData();
-    setBillImage(file);
-    setBillImageUrl(URL.createObjectURL(file));
-    setUsingDemo(false);
+    void scanBillImage(file);
   }
 
   function loadDemo() {
+    scanSequenceRef.current += 1;
     setBillImage(null);
     setBillImageUrl(null);
     setParticipants(DEMO_PARTICIPANTS.map((participant) => ({ ...participant })));
@@ -193,6 +289,7 @@ export function CuentaApp() {
     setPayerId("pedro");
     setTipPercent(10);
     setUsingDemo(true);
+    resetScanState();
     setStep("items");
   }
 
@@ -418,6 +515,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
   }
 
   function deleteSession(result: "shared" | "deleted" = "deleted") {
+    scanSequenceRef.current += 1;
     setBillImage(null);
     setBillImageUrl(null);
     setParticipants([]);
@@ -453,6 +551,21 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
   return (
     <main className="app-frame">
       <AppHeader step={step} onBack={() => setStep(previousStep(step))} />
+      <input
+        ref={cameraInputRef}
+        className="sr-only"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleBillImage}
+      />
+      <input
+        ref={galleryInputRef}
+        className="sr-only"
+        type="file"
+        accept="image/*"
+        onChange={handleBillImage}
+      />
 
       {step === "capture" && (
         <section className="screen capture-screen">
@@ -473,7 +586,8 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
           <button
             className={`capture-card ${billImageUrl ? "with-image" : ""}`}
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => cameraInputRef.current?.click()}
+            disabled={scanState === "processing"}
           >
             {billImageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -486,26 +600,59 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
               </div>
             )}
             <span className="upload-action">
-              <b>▣</b>{" "}
-              {billImageUrl ? "Reemplazar cuenta" : "Abrir cámara o fototeca"}
+              <b>▣</b> {billImageUrl ? "Foto seleccionada" : "Vista previa"}
             </span>
           </button>
-          <input
-            ref={fileInputRef}
-            className="sr-only"
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleBillImage}
-          />
 
-          {billImage && (
+          <div className="capture-source-actions">
             <button
-              className="primary-action capture-continue"
-              onClick={() => setStep("items")}
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={scanState === "processing"}
             >
-              Ingresar consumos <span>→</span>
+              <span>▣</span>
+              <strong>Tomar foto</strong>
+              <small>Abrir cámara</small>
             </button>
+            <button
+              type="button"
+              onClick={() => galleryInputRef.current?.click()}
+              disabled={scanState === "processing"}
+            >
+              <span>▤</span>
+              <strong>Elegir desde Fotos</strong>
+              <small>Revisar guardadas</small>
+            </button>
+          </div>
+          {scanState === "processing" && (
+            <div className="scan-progress" role="status" aria-live="polite">
+              <span>
+                <strong>{scanMessage}</strong>
+                <small>{Math.round(scanProgress * 100)}%</small>
+              </span>
+              <progress max="1" value={scanProgress} />
+              <p>
+                La primera lectura puede tardar unos segundos. La foto se
+                procesa en este dispositivo.
+              </p>
+            </div>
+          )}
+
+          {scanState === "error" && (
+            <div className="scan-error" role="alert">
+              <strong>No se pudo completar la lectura</strong>
+              <p>{scanMessage}</p>
+              {billImage && (
+                <div>
+                  <button type="button" onClick={() => void scanBillImage(billImage)}>
+                    Reintentar lectura
+                  </button>
+                  <button type="button" onClick={() => setStep("items")}>
+                    Ingresar manualmente
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           <button className="text-action" type="button" onClick={loadDemo}>
@@ -542,20 +689,58 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
             description={
               usingDemo
                 ? "Esta es una cuenta de ejemplo. Puedes editarla antes de continuar."
-                : "Transcribe cada línea de la boleta. El escaneo automático llegará en una versión posterior."
+                : scanState === "success"
+                  ? "El lector creó un borrador. Revisa nombres, cantidades y precios antes de continuar."
+                  : "Agrega los consumos manualmente o vuelve a intentar la lectura."
             }
           />
 
           {billImageUrl && (
-            <button
-              type="button"
-              className="receipt-preview"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={billImageUrl} alt="Vista previa de la boleta" />
-              <span>Ver o reemplazar foto</span>
-            </button>
+            <>
+              <div className="receipt-preview">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={billImageUrl} alt="Vista previa de la boleta" />
+                <span>Foto original conservada para compartir</span>
+              </div>
+              <div className="receipt-replace-actions">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  Tomar otra
+                </button>
+                <button
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                >
+                  Elegir de Fotos
+                </button>
+                {billImage && (
+                  <button
+                    type="button"
+                    onClick={() => void scanBillImage(billImage)}
+                  >
+                    Volver a leer
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {scanState === "success" && (
+            <div className="scan-result" role="status">
+              <strong>✓ {scanMessage}</strong>
+              <p>
+                {ignoredLineCount > 0
+                  ? `${ignoredLineCount} líneas no se usaron porque parecían encabezados, totales o texto poco confiable.`
+                  : "Todas las líneas reconocidas fueron interpretadas."}
+              </p>
+              {scanWarnings.map((warning) => (
+                <p className="scan-warning" key={warning}>
+                  Atención: {warning}
+                </p>
+              ))}
+            </div>
           )}
 
           <div className="item-editor-list">

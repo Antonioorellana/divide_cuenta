@@ -9,7 +9,9 @@ propina proporcional.
 El piloto permite:
 
 - fotografiar una preboleta o comanda desde el iPhone;
-- transcribir, corregir y eliminar consumos;
+- elegir una fotografía guardada desde la fototeca;
+- leer consumos y montos mediante OCR local en español;
+- revisar, corregir, agregar y eliminar los consumos detectados;
 - agregar alias temporales y marcar quién pagó;
 - asignar unidades individuales o consumos compartidos;
 - calcular la propina proporcional en pesos chilenos;
@@ -17,14 +19,18 @@ El piloto permite:
 - eliminar la sesión después de compartir;
 - instalar la aplicación desde Safari como PWA.
 
-El OCR todavía no forma parte de esta versión. Los consumos se ingresan
-manualmente para validar primero el flujo y las reglas financieras.
+El OCR produce un borrador conservador: no inventa líneas que no puede
+interpretar y exige revisar nombres, cantidades y montos antes de dividir. Si
+una fotografía no es suficientemente legible, el ingreso manual permanece
+disponible.
 
 ## Privacidad
 
 La aplicación no usa cuentas ni una base de datos central. La fotografía, los
 alias y las asignaciones permanecen en memoria durante la sesión y se eliminan
-al compartir o finalizar. No se solicitan RUT, correos ni nombres legales.
+al compartir o finalizar. El OCR, su motor y el modelo de español se ejecutan
+desde la propia aplicación; la fotografía no se envía a una API externa. No se
+solicitan RUT, correos ni nombres legales.
 
 ## Desarrollo
 

@@ -20,8 +20,8 @@ compartir y OCR nativos sin mantener tres aplicaciones independientes.
 | Estado | Estado local de React | La sesión es pequeña y efímera |
 | Recuperación local | IndexedDB con vencimiento | Fase siguiente; evita perder una sesión accidentalmente |
 | Base de datos remota | Ninguna | No existe una finalidad válida para almacenar cuentas |
-| OCR Android | Google ML Kit, en dispositivo | Reconocimiento privado sin subir imágenes |
-| OCR iOS | Apple Vision, en dispositivo | Reconocimiento privado y nativo |
+| OCR PWA | Tesseract.js 7 + modelo español local | Reconocimiento en el navegador sin subir imágenes |
+| OCR nativo futuro | Apple Vision / Google ML Kit | Mayor precisión tras empaquetar con Capacitor |
 | Compartir | Web Share API / share sheet nativo | WhatsApp y otros destinos sin acoplamiento |
 | Pruebas | Node Test Runner | Sin dependencia adicional para el dominio |
 
@@ -39,10 +39,12 @@ IndexedDB durante un máximo breve y se purgará al finalizar o vencer.
 ```text
 domain/
 ├── models.ts       Tipos del negocio
-└── billing.ts      Distribución, propina y reconciliación
+├── billing.ts      Distribución, propina y reconciliación
+└── receipt-parser.ts Interpretación conservadora del texto OCR
 
 app/
 ├── CuentaApp.tsx   Flujo y presentación
+├── receipt-ocr.ts  Preparación de imagen y reconocimiento local
 └── PwaRegistration.tsx
 
 public/
@@ -59,9 +61,10 @@ de cuenta que el usuario deberá revisar y confirmar antes de asignar consumos.
 2. PWA instalable.
 3. Sesión local con vencimiento y purga.
 4. Captura y edición real de productos.
-5. OCR nativo mediante Capacitor.
+5. OCR web local con revisión obligatoria.
 6. Pruebas en dispositivos iOS y Android.
-7. Empaquetado y distribución de prueba.
+7. OCR nativo mediante Capacitor.
+8. Empaquetado y distribución de prueba.
 
 ## Restricciones no negociables
 
