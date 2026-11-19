@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "La Justa",
   },
   formatDetection: {
@@ -39,14 +39,16 @@ export const metadata: Metadata = {
     images: ["/og.png"],
   },
   icons: {
-    icon: "/icon-192.png",
-    shortcut: "/icon-192.png",
-    apple: "/icon-180.png",
+    icon: [
+      { url: "/la-justa-favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/la-justa-icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: { url: "/la-justa-apple-180.png", sizes: "180x180", type: "image/png" },
   },
 };
 
 export const viewport = {
-  themeColor: "#426655",
+  themeColor: "#120e17",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",

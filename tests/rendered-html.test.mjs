@@ -31,12 +31,22 @@ test("renderiza la aplicación La Justa", async () => {
   const html = await response.text();
   assert.match(html, /<title>La Justa<\/title>/i);
   assert.match(html, /Divide\./);
-  assert.match(html, /Fotografiar cuenta/);
-  assert.match(html, /Privada por diseño/);
+  assert.match(html, /Tomar foto/);
+  assert.match(html, /Elegir desde Fotos/);
+  assert.match(html, /La foto se procesa en tu dispositivo/);
   assert.match(
     html,
-    /Desarrollado por(?:\s*<!-- -->)?\s*<strong>Orvedevs<\/strong>\s*· Versión 1\.02/,
+    /<link[^>]+rel="icon"[^>]+href="(?:https?:\/\/[^"/]+)?\/la-justa-favicon-32\.png"/,
   );
+  assert.match(
+    html,
+    /<link[^>]+rel="apple-touch-icon"[^>]+href="(?:https?:\/\/[^"/]+)?\/la-justa-apple-180\.png"/,
+  );
+  assert.match(
+    html,
+    /Desarrollado por(?:\s*<!-- -->)?\s*<strong>Orvedevs<\/strong>\s*· Versión 1\.03/,
+  );
+  assert.doesNotMatch(html, /\bPiloto\b/i);
   assert.doesNotMatch(html, /Your site is taking shape|codex-preview/i);
 });
 
@@ -50,8 +60,16 @@ test("publica metadatos de una PWA instalable", async () => {
   assert.equal(parsedManifest.name, "La Justa");
   assert.equal(parsedManifest.display, "standalone");
   assert.equal(parsedManifest.lang, "es-CL");
-  assert.equal(parsedManifest.icons.length, 2);
-  assert.match(serviceWorker, /la-justa-v5/);
-  assert.match(serviceWorker, /icon-180\.png/);
+  assert.deepEqual(
+    parsedManifest.icons.map(({ sizes, purpose }) => [sizes, purpose]),
+    [["192x192", "any"], ["512x512", "any"], ["512x512", "maskable"]],
+  );
+  assert.match(serviceWorker, /la-justa-v8/);
+  assert.match(serviceWorker, /bar-hero\.webp/);
+  assert.match(serviceWorker, /consumption-photos\.webp/);
+  for (const { src } of parsedManifest.icons) {
+    assert.ok(serviceWorker.includes(src));
+  }
+  assert.match(serviceWorker, /la-justa-apple-180\.png/);
   assert.match(serviceWorker, /Sin conexión/);
 });

@@ -1,10 +1,14 @@
-const CACHE_NAME = "la-justa-v5";
+const CACHE_NAME = "la-justa-v8";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
-  "/icon-180.png",
-  "/icon-192.png",
-  "/icon-512.png",
+  "/bar-hero.webp",
+  "/consumption-photos.webp",
+  "/la-justa-favicon-32.png",
+  "/la-justa-apple-180.png",
+  "/la-justa-icon-192.png",
+  "/la-justa-icon-512.png",
+  "/la-justa-maskable-512.png",
 ];
 
 self.addEventListener("install", (event) => {

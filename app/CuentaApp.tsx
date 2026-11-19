@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, CSSProperties } from "react";
 import {
   calculateBillDistribution,
   isItemFullyAssigned,
@@ -13,9 +13,11 @@ import type {
   Participant,
   ParticipantTone,
 } from "../domain/models";
+import { getConsumptionCategory } from "../domain/consumption-category";
 import { recognizeReceipt } from "./receipt-ocr";
+import { SCREEN_ORDER, useScreenNavigation } from "./use-screen-navigation";
+import type { Step } from "./use-screen-navigation";
 
-type Step = "capture" | "items" | "people" | "assign" | "summary";
 type ScanState = "idle" | "processing" | "success" | "error";
 
 const DEMO_PARTICIPANTS: Participant[] = [
@@ -35,8 +37,8 @@ const DEMO_ITEMS: BillItem[] = [
     assignments: { pedro: 2, ana: 1, luis: 1 },
   },
   {
-    id: "hamburguesa",
-    name: "Hamburguesa",
+    id: "gin-tonic",
+    name: "Gin tonic",
     quantity: 2,
     total: 24000,
     shared: false,
@@ -44,7 +46,7 @@ const DEMO_ITEMS: BillItem[] = [
   },
   {
     id: "tabla",
-    name: "Tabla",
+    name: "Tabla de papas fritas",
     quantity: 1,
     total: 15000,
     shared: true,
@@ -103,7 +105,7 @@ function describeOcrStatus(status: string): string {
  * solicita de forma explícita.
  */
 export function CuentaApp() {
-  const [step, setStep] = useState<Step>("capture");
+  const { step, direction, motion, navigate, cancelNavigation } = useScreenNavigation();
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [items, setItems] = useState<BillItem[]>([]);
   const [payerId, setPayerId] = useState("");
@@ -228,7 +230,7 @@ export function CuentaApp() {
     scanSequenceRef.current = scanSequence;
     resetWorkingData();
     resetScanState();
-    setStep("capture");
+    navigate("capture", false);
     setBillImage(file);
     setBillImageUrl(URL.createObjectURL(file));
     setUsingDemo(false);
@@ -263,7 +265,7 @@ export function CuentaApp() {
       setScanMessage(
         `${parsedReceipt.items.length} consumos detectados`,
       );
-      setStep("items");
+      navigate("items");
     } catch {
       if (scanSequenceRef.current !== scanSequence) {
         return;
@@ -302,7 +304,7 @@ export function CuentaApp() {
     setTipPercent(10);
     setUsingDemo(true);
     resetScanState();
-    setStep("items");
+    navigate("items");
   }
 
   function addBillItem() {
@@ -384,7 +386,7 @@ export function CuentaApp() {
       return;
     }
     if (participants.length >= MAX_PARTICIPANTS) {
-      setParticipantError(`El piloto admite hasta ${MAX_PARTICIPANTS} personas.`);
+      setParticipantError(`Puedes agregar hasta ${MAX_PARTICIPANTS} personas.`);
       return;
     }
 
@@ -536,6 +538,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
   }
 
   function deleteSession(result: "shared" | "deleted" = "deleted") {
+    cancelNavigation();
     scanSequenceRef.current += 1;
     setBillImage(null);
     setBillImageUrl(null);
@@ -570,8 +573,12 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
   }
 
   return (
-    <main className="app-frame">
-      <AppHeader step={step} onBack={() => setStep(previousStep(step))} />
+    <main className="app-frame" data-screen-direction={direction} data-screen-motion={motion}>
+      <AppHeader
+        step={step}
+        usingDemo={usingDemo}
+        onBack={() => navigate(previousStep(step))}
+      />
       <input
         ref={cameraInputRef}
         className="sr-only"
@@ -590,120 +597,98 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
 
       {step === "capture" && (
         <section className="screen capture-screen">
-          <div className="hero-copy">
-            <h1>
-              Divide.
-              <br />
-              Comparte.
-              <br />
-              <span>Listo.</span>
-            </h1>
-            <p>
-              Divide una cuenta real por consumo y devuelve cada peso a quien
-              pagó.
-            </p>
-          </div>
-
-          <button
-            className={`capture-card ${billImageUrl ? "with-image" : ""}`}
-            type="button"
-            onClick={() => cameraInputRef.current?.click()}
-            disabled={scanState === "processing"}
-          >
-            {billImageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={billImageUrl} alt="Cuenta detallada seleccionada" />
-            ) : (
-              <div className="receipt-placeholder">
-                <span className="camera-orb">▣</span>
-                <strong>Fotografiar cuenta</strong>
-                <small>Precuenta, comanda o preboleta detallada</small>
-              </div>
-            )}
-            <span className="upload-action">
-              <b>▣</b> {billImageUrl ? "Foto seleccionada" : "Vista previa"}
-            </span>
-          </button>
-
-          <div className="capture-source-actions">
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              disabled={scanState === "processing"}
-            >
-              <span>▣</span>
-              <strong>Tomar foto</strong>
-              <small>Abrir cámara</small>
-            </button>
-            <button
-              type="button"
-              onClick={() => galleryInputRef.current?.click()}
-              disabled={scanState === "processing"}
-            >
-              <span>▤</span>
-              <strong>Elegir desde Fotos</strong>
-              <small>Revisar guardadas</small>
-            </button>
-          </div>
-          {scanState === "processing" && (
-            <div className="scan-progress" role="status" aria-live="polite">
-              <span>
-                <strong>{scanMessage}</strong>
-                <small>{Math.round(scanProgress * 100)}%</small>
-              </span>
-              <progress max="1" value={scanProgress} />
+          <div className="capture-layout">
+            <div className="hero-copy">
+              <h1 id="screen-title" tabIndex={-1}>
+                Divide.
+                <br />
+                Comparte.
+                <br />
+                <span>Listo.</span>
+              </h1>
               <p>
-                La primera lectura puede tardar unos segundos. La foto se
-                procesa en este dispositivo.
+                Escanea la boleta y reparte la cuenta por consumo.
               </p>
             </div>
-          )}
 
-          {scanState === "error" && (
-            <div className="scan-error" role="alert">
-              <strong>No se pudo completar la lectura</strong>
-              <p>{scanMessage}</p>
-              {billImage && (
-                <div>
-                  <button type="button" onClick={() => void scanBillImage(billImage)}>
-                    Reintentar lectura
-                  </button>
-                  <button type="button" onClick={() => setStep("items")}>
-                    Ingresar manualmente
-                  </button>
+            <div className="capture-panel">
+              <span className="capture-mark ui-icon icon-receipt" aria-hidden="true" />
+              <h2>Escanea tu cuenta</h2>
+              <p>Usa una boleta o comanda con los consumos y precios visibles.</p>
+
+              {scanState === "processing" && (
+                <div className="scan-progress" role="status" aria-live="polite">
+                  <span>
+                    <strong>{scanMessage}</strong>
+                    <small>{Math.round(scanProgress * 100)}%</small>
+                  </span>
+                  <progress aria-label="Progreso de lectura" max="1" value={scanProgress} />
                 </div>
               )}
+              <div className="capture-source-actions">
+                <button
+                  className="primary-action"
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={scanState === "processing"}
+                >
+                  <span className="ui-icon icon-camera" aria-hidden="true" />
+                  Tomar foto
+                  <span aria-hidden="true">↗</span>
+                </button>
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                  disabled={scanState === "processing"}
+                >
+                  <span className="ui-icon icon-gallery" aria-hidden="true" />
+                  Elegir desde Fotos
+                </button>
+              </div>
+
+              {scanState === "error" && (
+                <div className="scan-error" role="alert">
+                  <strong>No se pudo completar la lectura</strong>
+                  <p>{scanMessage}</p>
+                  {billImage && (
+                    <div>
+                      <button type="button" onClick={() => void scanBillImage(billImage)}>
+                        Reintentar lectura
+                      </button>
+                      <button type="button" onClick={() => navigate("items")}>
+                        Ingresar manualmente
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {billImageUrl && (
+                <div className="capture-preview">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={billImageUrl} alt="Boleta seleccionada" />
+                </div>
+              )}
+
+              <button className="text-action" type="button" onClick={loadDemo}>
+                Probar cuenta de ejemplo <span aria-hidden="true">→</span>
+              </button>
+              <p className="privacy-note">
+                <span aria-hidden="true">◇</span> La foto se procesa en tu dispositivo.
+              </p>
             </div>
-          )}
+          </div>
 
-          <button className="text-action" type="button" onClick={loadDemo}>
-            Probar con una cuenta de ejemplo ↗
-          </button>
-
-          <div className="iphone-install-note">
-            <span>＋</span>
-            <p>
-              <strong>Instálala en tu iPhone</strong>
-              En Safari toca Compartir y luego “Agregar a inicio”.
+          <div className="capture-footer">
+            <details className="iphone-install-note">
+              <summary>Instálala en tu iPhone</summary>
+              <p>En Safari toca Compartir y luego «Agregar a inicio».</p>
+            </details>
+            <p className="developer-credit">
+              Desarrollado por <strong>Orvedevs</strong> · Versión 1.03
             </p>
           </div>
-
-          <div className="feature-grid">
-            <article>
-              <span className="feature-icon mint">⌁</span>
-              <strong>Privada por diseño</strong>
-              <p>La foto y los alias no se envían a nuestros servidores.</p>
-            </article>
-            <article>
-              <span className="feature-icon lavender">♙</span>
-              <strong>Sin cuentas</strong>
-              <p>Usa alias temporales y elimina todo al compartir.</p>
-            </article>
-          </div>
-
-          <p className="developer-credit">
-            Desarrollado por <strong>Orvedevs</strong> · Versión 1.02
-          </p>
         </section>
       )}
 
@@ -766,18 +751,20 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
           <div className="item-editor-list">
             {items.map((item, index) => (
               <article className="item-editor-card" key={item.id}>
-                <span className="item-number">{index + 1}</span>
                 <label className="item-name-field">
                   <small>Consumo</small>
-                  <input
-                    aria-label={`Nombre del consumo ${index + 1}`}
-                    aria-invalid={!item.name.trim()}
-                    value={item.name}
-                    maxLength={80}
-                    onChange={(event) =>
-                      updateBillItem(item.id, { name: event.target.value })
-                    }
-                  />
+                  <div className="item-name-content">
+                    <ConsumptionPhoto name={item.name} />
+                    <input
+                      aria-label={`Nombre del consumo ${index + 1}`}
+                      aria-invalid={!item.name.trim()}
+                      value={item.name}
+                      maxLength={80}
+                      onChange={(event) =>
+                        updateBillItem(item.id, { name: event.target.value })
+                      }
+                    />
+                  </div>
                 </label>
                 <label>
                   <small>Cant.</small>
@@ -914,7 +901,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
           <button
             className="primary-action sticky-action"
             disabled={!canContinueFromItems}
-            onClick={() => setStep("people")}
+            onClick={() => navigate("people")}
           >
             Continuar a personas <span>→</span>
           </button>
@@ -996,7 +983,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
           <button
             className="primary-action sticky-action"
             disabled={!canAssign}
-            onClick={() => setStep("assign")}
+            onClick={() => navigate("assign")}
           >
             Continuar a consumos <span>→</span>
           </button>
@@ -1026,11 +1013,14 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
               return (
                 <article className="consumption-card" key={item.id}>
                   <div className="consumption-heading">
-                    <div>
-                      <strong>
-                        {item.quantity}× {item.name}
-                      </strong>
-                      <b>{formatCurrency(item.total)}</b>
+                    <div className="consumption-title">
+                      <ConsumptionPhoto name={item.name} />
+                      <div>
+                        <strong>
+                          {item.quantity}× {item.name}
+                        </strong>
+                        <b>{formatCurrency(item.total)}</b>
+                      </div>
                     </div>
                     <span
                       className={
@@ -1117,26 +1107,29 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
             </div>
           </div>
 
-          <div className="assignment-footer">
-            <span className={allAssigned ? "ready" : ""}>
-              {allAssigned
-                ? "✓ Todo asignado"
-                : `⚠ ${totalUnits - assignedUnits} ${
-                    totalUnits - assignedUnits === 1
-                      ? "unidad pendiente"
-                      : "unidades pendientes"
-                  }`}
-            </span>
-            <strong>{formatCurrency(grandTotal)} total</strong>
-            <button
-              className="primary-action"
-              disabled={!allAssigned}
-              onClick={() => setStep("summary")}
-            >
-              Ver resumen <span>→</span>
-            </button>
-          </div>
         </section>
+      )}
+
+      {step === "assign" && (
+        <div className="assignment-footer">
+          <span className={allAssigned ? "ready" : ""}>
+            {allAssigned
+              ? "✓ Todo asignado"
+              : `⚠ ${totalUnits - assignedUnits} ${
+                  totalUnits - assignedUnits === 1
+                    ? "unidad pendiente"
+                    : "unidades pendientes"
+                }`}
+          </span>
+          <strong>{formatCurrency(grandTotal)} total</strong>
+          <button
+            className="primary-action"
+            disabled={!allAssigned}
+            onClick={() => navigate("summary")}
+          >
+            Ver resumen <span>→</span>
+          </button>
+        </div>
       )}
 
       {step === "summary" && allAssigned && (
@@ -1216,34 +1209,40 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
         canContinueFromItems={canContinueFromItems}
         canAssign={canAssign}
         canSummarize={allAssigned}
-        onNavigate={setStep}
+        onNavigate={navigate}
       />
-      {usingDemo && step !== "capture" && (
-        <span className="demo-badge">Cuenta de ejemplo</span>
-      )}
     </main>
   );
 }
 
 function AppHeader({
   step,
+  usingDemo,
   onBack,
 }: {
   step: Step;
+  usingDemo: boolean;
   onBack: () => void;
 }) {
   return (
     <header className="app-header">
-      <button
-        type="button"
-        className={step === "capture" ? "brand-button" : "back-button"}
-        onClick={step === "capture" ? undefined : onBack}
-        aria-label={step === "capture" ? "La Justa" : "Volver"}
-      >
-        {step === "capture" ? "◴" : "←"}
-      </button>
-      <strong>La Justa</strong>
-      <span className="pilot-badge">Piloto</span>
+      {step !== "capture" && (
+        <button
+          type="button"
+          className="back-button"
+          onClick={onBack}
+          aria-label="Volver"
+        >
+          <span aria-hidden="true">←</span>
+        </button>
+      )}
+      <div className="brand-lockup">
+        <span className="brand-mark" aria-hidden="true" />
+        <strong>La Justa<span>.</span></strong>
+      </div>
+      {usingDemo && step !== "capture" && (
+        <span className="demo-badge">Cuenta de ejemplo</span>
+      )}
     </header>
   );
 }
@@ -1257,10 +1256,23 @@ function ScreenTitle({
 }) {
   return (
     <div className="screen-title">
-      <h1>{title}</h1>
+      <h1 id="screen-title" tabIndex={-1}>{title}</h1>
       <p>{description}</p>
     </div>
   );
+}
+
+/**
+ * Muestra una miniatura de referencia cuando se reconoce el tipo de consumo.
+ *
+ * @param props Nombre completo que se muestra en la fila.
+ * @returns Imagen decorativa o `null` si el nombre no se reconoce.
+ */
+function ConsumptionPhoto({ name }: { name: string }) {
+  const category = getConsumptionCategory(name);
+  return category ? (
+    <span className="consumption-photo" data-category={category} aria-hidden="true" />
+  ) : null;
 }
 
 function ParticipantAvatar({ participant }: { participant: Participant }) {
@@ -1292,25 +1304,29 @@ function BottomNavigation({
     label: string;
     enabled: boolean;
   }> = [
-    { step: "capture", icon: "▣", label: "Cuenta", enabled: true },
-    { step: "items", icon: "≡", label: "Ítems", enabled: hasReceipt },
-    { step: "people", icon: "♙", label: "Personas", enabled: canContinueFromItems },
+    { step: "capture", icon: "camera", label: "Cuenta", enabled: true },
+    { step: "items", icon: "receipt", label: "Ítems", enabled: hasReceipt },
+    { step: "people", icon: "people", label: "Personas", enabled: canContinueFromItems },
     {
       step: "assign",
-      icon: "▤",
+      icon: "divide",
       label: "Consumos",
       enabled: canAssign,
     },
     {
       step: "summary",
-      icon: "▧",
+      icon: "summary",
       label: "Resumen",
       enabled: canSummarize,
     },
   ];
 
   return (
-    <nav className="bottom-navigation" aria-label="Pasos">
+    <nav
+      className="bottom-navigation"
+      aria-label="Pasos"
+      style={{ "--active-step": SCREEN_ORDER.indexOf(step) } as CSSProperties}
+    >
       {navigationItems.map((item) => (
         <button
           type="button"
@@ -1319,8 +1335,11 @@ function BottomNavigation({
           disabled={!item.enabled}
           onClick={() => onNavigate(item.step)}
           aria-label={item.label}
+          aria-current={step === item.step ? "step" : undefined}
         >
-          <span>{item.icon}</span>
+          <span className="dock-icon" aria-hidden="true">
+            <span className={`ui-icon icon-${item.icon}`} />
+          </span>
           <small>{item.label}</small>
         </button>
       ))}
