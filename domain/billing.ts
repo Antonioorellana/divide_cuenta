@@ -4,6 +4,18 @@ import type {
   Participant,
 } from "./models.ts";
 
+export const MAX_LINE_TOTAL = 99_999_999;
+
+/**
+ * Comprueba que el total de una línea editable sea un monto entero en CLP.
+ *
+ * @param amount Total ingresado o reconocido en la boleta.
+ * @returns Si el monto es positivo y está dentro del rango de lectura del OCR.
+ */
+export function isValidLineTotal(amount: number): boolean {
+  return Number.isSafeInteger(amount) && amount > 0 && amount <= MAX_LINE_TOTAL;
+}
+
 /**
  * Distribuye pesos enteros por peso relativo y entrega los residuos de forma
  * determinista para que la suma nunca difiera del total original.

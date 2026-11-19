@@ -5,6 +5,8 @@ import type { ChangeEvent } from "react";
 import {
   calculateBillDistribution,
   isItemFullyAssigned,
+  isValidLineTotal,
+  MAX_LINE_TOTAL,
 } from "../domain/billing";
 import { parseReceiptText } from "../domain/receipt-parser";
 import type {
@@ -61,7 +63,6 @@ const DEMO_ITEMS: BillItem[] = [
 
 const TONES: ParticipantTone[] = ["mint", "lavender", "blue", "peach"];
 const MAX_PARTICIPANTS = 20;
-const MAX_ITEMS = 60;
 const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 
 const currencyFormatter = new Intl.NumberFormat("es-CL", {
@@ -119,7 +120,8 @@ export function CuentaApp() {
   const [scanState, setScanState] = useState<ScanState>("idle");
   const [scanProgress, setScanProgress] = useState(0);
   const [scanMessage, setScanMessage] = useState("");
-  const [scanWarnings, setScanWarnings] = useState<string[]>([]);
+  const [detectedSubtotal, setDetectedSubtotal] = useState<number | null>(null);
+  const [receiptSubtotalInput, setReceiptSubtotalInput] = useState("");
   const [ignoredLineCount, setIgnoredLineCount] = useState(0);
   const [shareStatus, setShareStatus] = useState("");
   const [sessionDeleted, setSessionDeleted] = useState(false);
@@ -139,10 +141,20 @@ export function CuentaApp() {
   }, [billImageUrl]);
 
   const billSubtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const allAssigned =
+  const receiptSubtotal = Number(receiptSubtotalInput);
+  const hasReceiptSubtotal =
+    Number.isSafeInteger(receiptSubtotal) && receiptSubtotal > 0;
+  const subtotalMatches = hasReceiptSubtotal && billSubtotal === receiptSubtotal;
+  const canContinueFromItems =
     items.length > 0 &&
+    items.every((item) => item.name.trim() && isValidLineTotal(item.total)) &&
+    (!billImage || subtotalMatches);
+  const canAssign =
+    canContinueFromItems &&
     participants.length >= 2 &&
-    items.every(isItemFullyAssigned);
+    participants.some((participant) => participant.id === payerId);
+  const allAssigned =
+    canAssign && items.every(isItemFullyAssigned);
   const distribution = useMemo(
     () =>
       allAssigned
@@ -195,7 +207,8 @@ export function CuentaApp() {
     setScanState("idle");
     setScanProgress(0);
     setScanMessage("");
-    setScanWarnings([]);
+    setDetectedSubtotal(null);
+    setReceiptSubtotalInput("");
     setIgnoredLineCount(0);
   }
 
@@ -236,9 +249,9 @@ export function CuentaApp() {
         return;
       }
 
-      setItems(parsedReceipt.items.slice(0, MAX_ITEMS));
+      setItems(parsedReceipt.items);
       setIgnoredLineCount(parsedReceipt.ignoredLineCount);
-      setScanWarnings(parsedReceipt.warnings);
+      setDetectedSubtotal(parsedReceipt.declaredSubtotal);
       setScanProgress(1);
 
       if (parsedReceipt.items.length === 0) {
@@ -249,7 +262,7 @@ export function CuentaApp() {
 
       setScanState("success");
       setScanMessage(
-        `${Math.min(parsedReceipt.items.length, MAX_ITEMS)} consumos detectados`,
+        `${parsedReceipt.items.length} consumos detectados`,
       );
       setStep("items");
     } catch {
@@ -260,7 +273,6 @@ export function CuentaApp() {
       setScanMessage(
         "No pudimos leer esta foto. Reintenta con la boleta recta, completa y bien iluminada.",
       );
-      setScanWarnings([]);
       setIgnoredLineCount(0);
     }
   }
@@ -277,6 +289,7 @@ export function CuentaApp() {
 
   function loadDemo() {
     scanSequenceRef.current += 1;
+    resetWorkingData();
     setBillImage(null);
     setBillImageUrl(null);
     setParticipants(DEMO_PARTICIPANTS.map((participant) => ({ ...participant })));
@@ -306,12 +319,8 @@ export function CuentaApp() {
       setItemError("La cantidad debe ser un número entre 1 y 99.");
       return;
     }
-    if (!Number.isInteger(total) || total <= 0) {
-      setItemError("Ingresa el total de esa línea en pesos.");
-      return;
-    }
-    if (items.length >= MAX_ITEMS) {
-      setItemError(`El piloto admite hasta ${MAX_ITEMS} consumos.`);
+    if (!isValidLineTotal(total)) {
+      setItemError(`Ingresa un monto entero entre $1 y ${formatCurrency(MAX_LINE_TOTAL)}.`);
       return;
     }
 
@@ -339,7 +348,16 @@ export function CuentaApp() {
     setItems((current) =>
       current.map((item) =>
         item.id === itemId
-          ? { ...item, ...patch, assignments: {} }
+          ? {
+              ...item,
+              ...patch,
+              assignments:
+                !item.shared &&
+                patch.quantity !== undefined &&
+                patch.quantity !== item.quantity
+                  ? {}
+                  : item.assignments,
+            }
           : item,
       ),
     );
@@ -480,6 +498,10 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
   }
 
   async function shareSummary() {
+    if (!allAssigned) {
+      return;
+    }
+
     const summary = buildSummary();
     setShareStatus("");
 
@@ -518,9 +540,9 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
     scanSequenceRef.current += 1;
     setBillImage(null);
     setBillImageUrl(null);
-    setParticipants([]);
-    setItems([]);
-    setPayerId("");
+    setUsingDemo(false);
+    resetWorkingData();
+    resetScanState();
     setSessionResult(result);
     setSessionDeleted(true);
   }
@@ -536,7 +558,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
         <p className="muted">
           {sessionResult === "shared"
             ? "La boleta, los alias y las asignaciones fueron eliminados de esta sesión después de compartir."
-            : "La boleta, los alias y las asignaciones ya no están disponibles en este dispositivo."}
+            : "La boleta, los alias y las asignaciones se eliminaron de esta sesión."}
         </p>
         <button
           className="primary-action"
@@ -739,11 +761,6 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
                   ? `${ignoredLineCount} líneas no se usaron porque parecían encabezados, totales o texto poco confiable.`
                   : "Todas las líneas reconocidas fueron interpretadas."}
               </p>
-              {scanWarnings.map((warning) => (
-                <p className="scan-warning" key={warning}>
-                  Atención: {warning}
-                </p>
-              ))}
             </div>
           )}
 
@@ -755,6 +772,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
                   <small>Consumo</small>
                   <input
                     aria-label={`Nombre del consumo ${index + 1}`}
+                    aria-invalid={!item.name.trim()}
                     value={item.name}
                     maxLength={80}
                     onChange={(event) =>
@@ -790,10 +808,11 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
                     type="number"
                     inputMode="numeric"
                     min="1"
+                    max={MAX_LINE_TOTAL}
                     value={item.total}
                     onChange={(event) => {
                       const total = Number(event.target.value);
-                      if (Number.isInteger(total) && total > 0) {
+                      if (isValidLineTotal(total)) {
                         updateBillItem(item.id, { total });
                       }
                     }}
@@ -839,6 +858,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
                 type="number"
                 inputMode="numeric"
                 min="1"
+                max={MAX_LINE_TOTAL}
                 placeholder="12000"
                 value={newItemTotal}
                 onChange={(event) => setNewItemTotal(event.target.value)}
@@ -859,18 +879,42 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
             <span>
               {items.length} {items.length === 1 ? "consumo" : "consumos"}
             </span>
-            <strong>Subtotal {formatCurrency(billSubtotal)}</strong>
+            <strong>Suma de consumos {formatCurrency(billSubtotal)}</strong>
           </div>
+
+          {billImage && (
+            <div className="receipt-reconciliation">
+              <label htmlFor="receipt-subtotal">Subtotal de la boleta en pesos</label>
+              <input
+                id="receipt-subtotal"
+                type="number"
+                inputMode="numeric"
+                min="1"
+                placeholder="67500"
+                value={receiptSubtotalInput}
+                onChange={(event) => setReceiptSubtotalInput(event.target.value)}
+                aria-describedby="receipt-subtotal-guide receipt-subtotal-status"
+              />
+              <p id="receipt-subtotal-guide">
+                Revisa la foto e ingresa el monto antes de propina.
+                {detectedSubtotal !== null &&
+                  ` El lector encontró un subtotal de ${formatCurrency(detectedSubtotal)}.`}
+              </p>
+              <p id="receipt-subtotal-status" role="status">
+                {subtotalMatches
+                  ? "El subtotal coincide con la suma de consumos."
+                  : hasReceiptSubtotal
+                    ? `Hay una diferencia de ${formatCurrency(
+                        Math.abs(receiptSubtotal - billSubtotal),
+                      )}. Revisa los consumos antes de continuar.`
+                    : "Ingresa el subtotal para continuar."}
+              </p>
+            </div>
+          )}
 
           <button
             className="primary-action sticky-action"
-            disabled={
-              items.length === 0 ||
-              items.some(
-                (item) =>
-                  !item.name.trim() || item.quantity <= 0 || item.total <= 0,
-              )
-            }
+            disabled={!canContinueFromItems}
             onClick={() => setStep("people")}
           >
             Continuar a personas <span>→</span>
@@ -952,7 +996,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
 
           <button
             className="primary-action sticky-action"
-            disabled={participants.length < 2 || !payerId}
+            disabled={!canAssign}
             onClick={() => setStep("assign")}
           >
             Continuar a consumos <span>→</span>
@@ -1096,7 +1140,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
         </section>
       )}
 
-      {step === "summary" && (
+      {step === "summary" && allAssigned && (
         <section className="screen summary-screen">
           <ScreenTitle
             title="Resumen de la cuenta"
@@ -1169,9 +1213,9 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
 
       <BottomNavigation
         step={step}
-        hasReceipt={hasReceipt}
-        hasItems={items.length > 0}
-        hasParticipants={participants.length >= 2}
+        hasReceipt={hasReceipt && scanState !== "processing"}
+        canContinueFromItems={canContinueFromItems}
+        canAssign={canAssign}
         canSummarize={allAssigned}
         onNavigate={setStep}
       />
@@ -1231,15 +1275,15 @@ function ParticipantAvatar({ participant }: { participant: Participant }) {
 function BottomNavigation({
   step,
   hasReceipt,
-  hasItems,
-  hasParticipants,
+  canContinueFromItems,
+  canAssign,
   canSummarize,
   onNavigate,
 }: {
   step: Step;
   hasReceipt: boolean;
-  hasItems: boolean;
-  hasParticipants: boolean;
+  canContinueFromItems: boolean;
+  canAssign: boolean;
   canSummarize: boolean;
   onNavigate: (step: Step) => void;
 }) {
@@ -1251,12 +1295,12 @@ function BottomNavigation({
   }> = [
     { step: "capture", icon: "▣", label: "Cuenta", enabled: true },
     { step: "items", icon: "≡", label: "Ítems", enabled: hasReceipt },
-    { step: "people", icon: "♙", label: "Personas", enabled: hasItems },
+    { step: "people", icon: "♙", label: "Personas", enabled: canContinueFromItems },
     {
       step: "assign",
       icon: "▤",
       label: "Consumos",
-      enabled: hasItems && hasParticipants,
+      enabled: canAssign,
     },
     {
       step: "summary",

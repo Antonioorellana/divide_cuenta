@@ -575,10 +575,6 @@ button {
   margin: 0 0 14px;
 }
 
-.scan-result .scan-warning {
-  color: #8a4b0f;
-}
-
 .item-editor-list {
   display: grid;
   gap: 10px;
@@ -625,7 +621,8 @@ button {
 }
 
 .item-editor-card input,
-.new-item-card input {
+.new-item-card input,
+.receipt-reconciliation input {
   width: 100%;
   min-width: 0;
   height: 42px;
@@ -638,7 +635,8 @@ button {
 }
 
 .item-editor-card input:focus,
-.new-item-card input:focus {
+.new-item-card input:focus,
+.receipt-reconciliation input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(66, 102, 85, 0.1);
 }
@@ -709,6 +707,36 @@ button {
 .bill-subtotal strong {
   color: var(--primary-deep);
   font-size: 13px;
+}
+
+.receipt-reconciliation {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+  color: var(--primary-deep);
+  font-size: 14px;
+}
+
+.receipt-reconciliation label {
+  font-weight: 650;
+}
+
+.receipt-reconciliation input {
+  font-size: 16px;
+}
+
+.receipt-reconciliation p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.receipt-reconciliation [role="status"] {
+  font-weight: 650;
 }
 
 .add-person-field {

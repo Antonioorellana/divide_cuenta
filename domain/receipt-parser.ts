@@ -8,28 +8,17 @@ export type ReceiptParseResult = {
   warnings: string[];
 };
 
-const SUMMARY_WORDS = [
-  "total",
-  "subtotal",
-  "sub total",
-  "propina",
-  "iva",
-  "impuesto",
-  "neto",
-  "exento",
-  "descuento",
-  "efectivo",
-  "tarjeta",
-  "debito",
-  "credito",
-  "vuelto",
-  "cambio",
-  "pago",
-  "monto",
-];
+const SUMMARY_LABEL =
+  /^(?:total|sub\s*total|propina|iva|impuesto|neto|exento|descuento|efectivo|tarjeta|debito|credito|vuelto|cambio|pago|monto|comensal(?:es)?)\b/;
+const SUBTOTAL_LABEL =
+  /^(?:sub\s*total\b|total\s*\(?\s*(?:impuestos?\s+incl(?:uidos?)?\b|sin\s+propina\b))/;
+const TOTAL_LABEL = /^total\b(?!\s*(?:\/|por\b))/;
+const PER_PERSON_TOTAL = /\btotal\s*(?:\/\s*|por\s+)(?:comensal|persona)\b/;
+const MODIFIER_LINE = /^c{1,2}[.,]\s+(.+)$/i;
+const TRAILING_OCR_FRAGMENT = /(?<=\d)[ \t]{2,}[\p{L}]{1,2}\.?\s*$/u;
 
 const MONEY_AT_END =
-  /(?:\$\s*)?(\d{1,3}(?:(?:[.,]\s*|\s)\d{3})+|\d{3,8})(?:\s*(?:clp|pesos?))?\s*$/i;
+  /(?<![\d.,])(?:[+-]\s*)?(?:\$\s*)?(\d{1,3}(?:(?:[.,]\s*|\s)\d{3})+|\d{3,8})(?:\s*(?:clp|pesos?))?\s*$/i;
 const MONEY_ONLY = new RegExp(`^${MONEY_AT_END.source}`, "i");
 const QUANTITY_PREFIX =
   /^[^\p{L}\d]{0,3}([1-9]\d?)(?:[.,]0{1,2})?\s*(?:[xX*]\s*)?(.+)$/u;
@@ -41,13 +30,15 @@ const QUANTITY_PREFIX =
  * @returns Monto en CLP o `null` cuando el texto no representa un monto válido.
  */
 export function parseChileanAmount(token: string): number | null {
-  const digits = token.replace(/\D/g, "");
-  if (digits.length < 3 || digits.length > 8) {
+  const trimmed = token.trim();
+  const match = trimmed.match(MONEY_ONLY);
+  if (!match || /^[+-]/.test(trimmed)) {
     return null;
   }
 
+  const digits = match[1].replace(/\D/g, "");
   const value = Number(digits);
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
+  return digits.length <= 8 && value > 0 ? value : null;
 }
 
 function normalizeForComparison(value: string): string {
@@ -57,9 +48,9 @@ function normalizeForComparison(value: string): string {
     .toLocaleLowerCase("es-CL");
 }
 
-function containsSummaryWord(line: string): boolean {
+function isSummaryLine(line: string): boolean {
   const normalized = normalizeForComparison(line);
-  return SUMMARY_WORDS.some((word) => normalized.includes(word));
+  return SUMMARY_LABEL.test(normalized) || PER_PERSON_TOTAL.test(normalized);
 }
 
 function cleanItemName(value: string): string {
@@ -79,9 +70,24 @@ function normalizeOcrLine(value: string): string {
     .replace(/[|¦]/g, "I")
     .replace(/^[^\p{L}\d]{1,3}(?=\s*[1Il][.,]0{2}\s)/u, "")
     .replace(/^[Il](?=[.,]0{2}\s)/, "1")
-    .replace(/(\d)[.,]\s+(\d{3})(?=\D*$)/, "$1.$2")
-    .replace(/\s+/g, " ")
+    .replace(/(\d)\s*[.,]\s*(\d{3})(?=\D*$)/, "$1.$2")
     .trim();
+}
+
+/**
+ * Encuentra el importe de una línea, incluso si el fondo dejó letras aisladas
+ * después de la columna de precios en una fila con cantidad explícita.
+ *
+ * @param line Línea de OCR con la separación entre columnas intacta.
+ * @returns Coincidencia del importe o `null`.
+ */
+function findLineAmount(line: string): RegExpMatchArray | null {
+  const amount = line.match(MONEY_AT_END);
+  if (amount || !QUANTITY_PREFIX.test(line)) {
+    return amount;
+  }
+
+  return line.replace(TRAILING_OCR_FRAGMENT, "").match(MONEY_AT_END);
 }
 
 function mergeDetachedPrices(lines: string[]): string[] {
@@ -108,29 +114,17 @@ function mergeDetachedPrices(lines: string[]): string[] {
   return mergedLines;
 }
 
-function findDeclaredTotal(lines: string[]): number | null {
+/**
+ * Extrae el último monto legible para la etiqueta solicitada.
+ *
+ * @param lines Líneas de OCR normalizadas.
+ * @param label Patrón para identificar el tipo de total.
+ * @returns Monto leído o `null` si falta la etiqueta o el precio.
+ */
+function findDeclaredAmount(lines: string[], label: RegExp): number | null {
   const candidates = lines
-    .filter((line) => {
-      const normalized = normalizeForComparison(line);
-      return (
-        /\btotal\b/.test(normalized) &&
-        !normalized.includes("subtotal") &&
-        !normalized.includes("propina")
-      );
-    })
-    .map((line) => line.match(MONEY_AT_END)?.[1] ?? "")
-    .map(parseChileanAmount)
-    .filter((amount): amount is number => amount !== null);
-
-  return candidates.at(-1) ?? null;
-}
-
-function findDeclaredSubtotal(lines: string[]): number | null {
-  const candidates = lines
-    .filter((line) =>
-      /\bsub\s*total\b/.test(normalizeForComparison(line)),
-    )
-    .map((line) => line.match(MONEY_AT_END)?.[1] ?? "")
+    .filter((line) => label.test(normalizeForComparison(line)))
+    .map((line) => line.match(MONEY_AT_END)?.[0] ?? "")
     .map(parseChileanAmount)
     .filter((amount): amount is number => amount !== null);
 
@@ -156,19 +150,33 @@ export function parseReceiptText(rawText: string): ReceiptParseResult {
       .filter(Boolean),
   );
 
-  const declaredTotal = findDeclaredTotal(lines);
-  const declaredSubtotal = findDeclaredSubtotal(lines);
+  const declaredTotal = findDeclaredAmount(lines, TOTAL_LABEL);
+  const declaredSubtotal = findDeclaredAmount(lines, SUBTOTAL_LABEL);
   const items: BillItem[] = [];
   let ignoredLineCount = 0;
+  let previousItem: BillItem | null = null;
 
   for (const line of lines) {
-    const moneyMatch = line.match(MONEY_AT_END);
-    if (!moneyMatch || containsSummaryWord(line)) {
+    const moneyMatch = findLineAmount(line);
+    const modifier = line.match(MODIFIER_LINE);
+    const hasModifierPrice = moneyMatch && /\$|[.,]\d{3}/.test(moneyMatch[0]);
+    if (modifier && !hasModifierPrice) {
+      if (previousItem) {
+        const detail = modifier[1].replace(/[ \t]{3,}.*$/, "");
+        previousItem.name += ` · ${detail}`;
+      } else {
+        ignoredLineCount += 1;
+      }
+      continue;
+    }
+
+    previousItem = null;
+    if (!moneyMatch || isSummaryLine(line)) {
       ignoredLineCount += 1;
       continue;
     }
 
-    const total = parseChileanAmount(moneyMatch[1]);
+    const total = parseChileanAmount(moneyMatch[0]);
     if (total === null) {
       ignoredLineCount += 1;
       continue;
@@ -192,33 +200,32 @@ export function parseReceiptText(rawText: string): ReceiptParseResult {
       }
     }
 
-    const name = cleanItemName(itemText);
+    const name = cleanItemName(itemText.replace(/\s+\/\s*$/, ""));
     if (name.length < 2 || !/\p{L}/u.test(name)) {
       ignoredLineCount += 1;
       continue;
     }
 
-    items.push({
+    previousItem = {
       id: `ocr-${items.length + 1}`,
       name,
       quantity,
       total,
       shared: false,
       assignments: {},
-    });
+    };
+    items.push(previousItem);
   }
 
   const warnings: string[] = [];
   const detectedSubtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const reconciliationTarget = declaredSubtotal ?? declaredTotal;
-
   if (
-    reconciliationTarget !== null &&
+    declaredSubtotal !== null &&
     items.length > 0 &&
-    detectedSubtotal !== reconciliationTarget
+    detectedSubtotal !== declaredSubtotal
   ) {
     warnings.push(
-      `La suma detectada es ${detectedSubtotal.toLocaleString("es-CL")} y la boleta muestra ${reconciliationTarget.toLocaleString("es-CL")} antes de propina. Revisa precios o líneas faltantes.`,
+      `La suma detectada es ${detectedSubtotal.toLocaleString("es-CL")} y la boleta muestra un subtotal de ${declaredSubtotal.toLocaleString("es-CL")}. Revisa precios o líneas faltantes.`,
     );
   }
 
