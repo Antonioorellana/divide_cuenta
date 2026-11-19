@@ -35,7 +35,7 @@ test("renderiza la aplicación La Justa", async () => {
   assert.match(html, /Privada por diseño/);
   assert.match(
     html,
-    /Desarrollado por(?:\s*<!-- -->)?\s*<strong>Orvedevs<\/strong>/,
+    /Desarrollado por(?:\s*<!-- -->)?\s*<strong>Orvedevs<\/strong>\s*· Versión 1\.02/,
   );
   assert.doesNotMatch(html, /Your site is taking shape|codex-preview/i);
 });

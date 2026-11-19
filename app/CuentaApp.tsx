@@ -702,7 +702,7 @@ Total distribuido: ${formatCurrency(grandTotal)} ✓`;
           </div>
 
           <p className="developer-credit">
-            Desarrollado por <strong>Orvedevs</strong>
+            Desarrollado por <strong>Orvedevs</strong> · Versión 1.02
           </p>
         </section>
       )}
