@@ -8,7 +8,6 @@ import {
   isValidLineTotal,
   MAX_LINE_TOTAL,
 } from "../domain/billing";
-import { parseReceiptText } from "../domain/receipt-parser";
 import type {
   BillItem,
   Participant,
@@ -90,6 +89,7 @@ function describeOcrStatus(status: string): string {
     "loading language traineddata": "Cargando español",
     "initializing api": "Ajustando el reconocimiento",
     "recognizing text": "Leyendo consumos y precios",
+    "checking prices": "Comprobando los importes de la boleta",
   };
 
   return descriptions[status] ?? "Analizando la boleta";
@@ -236,14 +236,13 @@ export function CuentaApp() {
     setScanMessage("Preparando la fotografía");
 
     try {
-      const recognizedText = await recognizeReceipt(file, (progress) => {
+      const parsedReceipt = await recognizeReceipt(file, (progress) => {
         if (scanSequenceRef.current !== scanSequence) {
           return;
         }
         setScanProgress(progress.progress);
         setScanMessage(describeOcrStatus(progress.status));
       });
-      const parsedReceipt = parseReceiptText(recognizedText);
 
       if (scanSequenceRef.current !== scanSequence) {
         return;
