@@ -1,9 +1,14 @@
 import { parseReceiptText } from "../domain/receipt-parser";
-import { reconcileReceiptReadings } from "../domain/receipt-reconciliation";
+import {
+  reconcileReceiptReadings,
+  selectReconciledReading,
+} from "../domain/receipt-reconciliation";
 import type { ReceiptDraft } from "../domain/receipt-reconciliation";
 
 const MAX_OCR_DIMENSION = 2400;
 const MIN_OCR_DIMENSION = 1800;
+const WIDE_OCR_DIMENSION = 1792;
+const WIDE_CHARACTER_SCALE = 2.3;
 const MAX_UPSCALE = 2;
 const NORMALIZATION_LOW_PERCENTILE = 0.01;
 const NORMALIZATION_HIGH_PERCENTILE = 0.99;
@@ -53,19 +58,28 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
  *
  * @param image Imagen original decodificada.
  * @param allowUpscale Si se permite ampliar una foto pequeña.
+ * @param horizontalScale Factor para separar caracteres impresos muy estrechos.
  * @returns Canvas listo para lectura o `null` si no hay contexto 2D.
  */
-function drawReceiptImage(image: HTMLImageElement, allowUpscale: boolean) {
+function drawReceiptImage(
+  image: HTMLImageElement,
+  allowUpscale: boolean,
+  horizontalScale = 1,
+) {
   const longestSide = Math.max(image.naturalWidth, image.naturalHeight);
-  const scale =
+  const targetDimension = horizontalScale > 1 ? WIDE_OCR_DIMENSION : MIN_OCR_DIMENSION;
+  const baseScale =
     longestSide > MAX_OCR_DIMENSION
       ? MAX_OCR_DIMENSION / longestSide
-      : allowUpscale && longestSide < MIN_OCR_DIMENSION
-        ? Math.min(MAX_UPSCALE, MIN_OCR_DIMENSION / longestSide)
+      : allowUpscale && longestSide < targetDimension
+        ? Math.min(MAX_UPSCALE, targetDimension / longestSide)
         : 1;
+  const width = image.naturalWidth * horizontalScale;
+  // Limita ambos ejes incluso al ensanchar la foto para la lectura alternativa.
+  const scale = Math.min(baseScale, MAX_OCR_DIMENSION / width);
 
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) {
@@ -264,6 +278,23 @@ export async function recognizeReceipt(
       const alternateReadings: ReceiptDraft[] = [];
       retryProgress = 0.85;
       onProgress({ progress: retryProgress, status: "checking prices" });
+
+      if (original.declaredSubtotal !== null) {
+        const wide = drawReceiptImage(photo, true, WIDE_CHARACTER_SCALE);
+        if (wide) {
+          const detail = await worker.recognize(wide.canvas).catch(() => null);
+          wide.canvas.width = 1;
+          wide.canvas.height = 1;
+          if (detail) {
+            const alternative = parseReceiptText(detail.data.text);
+            const reconciled = selectReconciledReading(original, alternative);
+            if (reconciled) {
+              return reconciled;
+            }
+          }
+        }
+      }
+
       const contrast = drawReceiptImage(photo, false);
       if (contrast) {
         applyLocalContrast(contrast);

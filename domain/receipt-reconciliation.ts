@@ -9,6 +9,31 @@ export type ReceiptDraft = Pick<
 type PriceChange = { itemIndex: number; amount: number; difference: number };
 
 /**
+ * Acepta una lectura alternativa completa cuando el subtotal impreso se
+ * reconoce igual en ambas pasadas y la alternativa cuadra sin perder filas.
+ *
+ * @param original Lectura que aporta la primera referencia del subtotal.
+ * @param alternate Lectura completa obtenida con otro preprocesamiento.
+ * @returns Borrador alternativo si coincide con la referencia, o `null`.
+ */
+export function selectReconciledReading(
+  original: ReceiptDraft,
+  alternate: ReceiptDraft,
+): ReceiptDraft | null {
+  if (
+    original.declaredSubtotal === null ||
+    alternate.declaredSubtotal !== original.declaredSubtotal ||
+    alternate.items.length === 0 ||
+    alternate.items.length < original.items.length
+  ) {
+    return null;
+  }
+
+  const subtotal = alternate.items.reduce((sum, item) => sum + item.total, 0);
+  return subtotal === original.declaredSubtotal ? alternate : null;
+}
+
+/**
  * Compara dos filas sin confundir líneas repetidas o variantes de un producto.
  *
  * @param original Fila del borrador inicial.

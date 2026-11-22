@@ -1,7 +1,30 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseReceiptText } from "../domain/receipt-parser.ts";
-import { reconcileReceiptReadings } from "../domain/receipt-reconciliation.ts";
+import {
+  reconcileReceiptReadings,
+  selectReconciledReading,
+} from "../domain/receipt-reconciliation.ts";
+
+describe("selectReconciledReading", () => {
+  it("recupera filas cuando ambas pasadas leen el mismo subtotal", () => {
+    const original = parseReceiptText("1 CAFE $8.000\nSUBTOTAL $3.000");
+    const alternate = parseReceiptText("1 CAFE $2.000\n1 AGUA $1.000\nSUBTOTAL $3.000");
+
+    assert.equal(selectReconciledReading(original, alternate), alternate);
+  });
+
+  it("descarta una alternativa si pierde filas o discrepa del subtotal original", () => {
+    const original = parseReceiptText("1 CAFE $8.000\n1 AGUA $1.000\nSUBTOTAL $3.000");
+    const fewerItems = parseReceiptText("1 CAFE $3.000\nSUBTOTAL $3.000");
+    const differentSubtotal = parseReceiptText("1 CAFE $2.000\n1 AGUA $2.000\nSUBTOTAL $4.000");
+    const doesNotAddUp = parseReceiptText("1 CAFE $3.000\n1 AGUA $1.000\nSUBTOTAL $3.000");
+
+    assert.equal(selectReconciledReading(original, fewerItems), null);
+    assert.equal(selectReconciledReading(original, differentSubtotal), null);
+    assert.equal(selectReconciledReading(original, doesNotAddUp), null);
+  });
+});
 
 describe("reconcileReceiptReadings", () => {
   it("corrige dos importes leídos por separado si cuadran con el subtotal", () => {

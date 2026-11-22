@@ -13,6 +13,8 @@ const SUMMARY_LABEL =
 const SUBTOTAL_LABEL =
   /^(?:sub\s*total\b|total\s*\(?\s*(?:impuestos?\s+incl(?:uidos?)?\b|sin\s+propina\b))/;
 const TOTAL_LABEL = /^total\b(?!\s*(?:\/|por\b))/;
+const TIP_LABEL = /^propina\b/;
+const HEADER_LABEL = /^(?:mesa|personas?|id|fecha|garzon(?:a)?|cajer[oa]|folio|rut)\s*:/;
 const PER_PERSON_TOTAL = /\btotal\s*(?:\/\s*|por\s+)(?:comensal|persona)\b/;
 const MODIFIER_LINE = /^c{1,2}[.,]\s+(.+)$/i;
 const TRAILING_OCR_FRAGMENT = /(?<=\d)[ \t]{2,}[\p{L}]{1,2}\.?\s*$/u;
@@ -50,7 +52,11 @@ function normalizeForComparison(value: string): string {
 
 function isSummaryLine(line: string): boolean {
   const normalized = normalizeForComparison(line);
-  return SUMMARY_LABEL.test(normalized) || PER_PERSON_TOTAL.test(normalized);
+  return (
+    SUMMARY_LABEL.test(normalized) ||
+    PER_PERSON_TOTAL.test(normalized) ||
+    HEADER_LABEL.test(normalized)
+  );
 }
 
 function cleanItemName(value: string): string {
@@ -132,6 +138,20 @@ function findDeclaredAmount(lines: string[], label: RegExp): number | null {
 }
 
 /**
+ * Busca el subtotal de consumos antes de que el comercio agregue la propina.
+ *
+ * @param lines Líneas reconocidas, en el orden de la precuenta.
+ * @returns Último subtotal legible anterior a la propina, o `null`.
+ */
+function findDeclaredSubtotal(lines: string[]): number | null {
+  const tipIndex = lines.findIndex((line) => TIP_LABEL.test(normalizeForComparison(line)));
+  return findDeclaredAmount(
+    tipIndex === -1 ? lines : lines.slice(0, tipIndex),
+    SUBTOTAL_LABEL,
+  );
+}
+
+/**
  * Interpreta texto OCR de una comanda o preboleta chilena.
  *
  * El analizador es deliberadamente conservador: solo crea consumos cuando una
@@ -151,7 +171,7 @@ export function parseReceiptText(rawText: string): ReceiptParseResult {
   );
 
   const declaredTotal = findDeclaredAmount(lines, TOTAL_LABEL);
-  const declaredSubtotal = findDeclaredAmount(lines, SUBTOTAL_LABEL);
+  const declaredSubtotal = findDeclaredSubtotal(lines);
   const items: BillItem[] = [];
   let ignoredLineCount = 0;
   let previousItem: BillItem | null = null;

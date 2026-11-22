@@ -104,6 +104,45 @@ describe("parseReceiptText", () => {
     assert.match(result.warnings[0], /subtotal de 1[.\s]?500/);
   });
 
+  it("usa el subtotal anterior a la propina cuando la precuenta imprime dos subtotales", () => {
+    const result = parseReceiptText(`
+      PRE-CUENTA
+      MESA: 123
+      PERSONAS: 5
+      ID: #1356
+      GARZÓN: TURNO 100
+      1 PARRILLAS PARA 4 PERSON $95,900
+      1 Tropical gin $7,900
+      2 Tom Collins $11,800
+      1 Jack Daniels 7 $8,600
+      1 Sour sabores tradicional $5,900
+      1 Coca Cola sin azúcar $2,800
+      1 Ensalada de palta $4,900
+      1 Chilena $4,500
+      Subtotal $142,300
+      Propina sugerida 10 $14,230
+      Subtotal $156,530
+      Total $156,530
+    `);
+
+    assert.deepEqual(result.items.map(({ quantity, total }) => [quantity, total]), [
+      [1, 95900], [1, 7900], [2, 11800], [1, 8600],
+      [1, 5900], [1, 2800], [1, 4900], [1, 4500],
+    ]);
+    assert.equal(result.declaredSubtotal, 142300);
+    assert.equal(result.declaredTotal, 156530);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  it("deja el subtotal pendiente si solo aparece uno después de la propina", () => {
+    const result = parseReceiptText(
+      "1 CAFE $2.000\nPropina sugerida $200\nSubtotal $2.200\nTotal $2.200",
+    );
+
+    assert.equal(result.declaredSubtotal, null);
+    assert.equal(result.declaredTotal, 2200);
+  });
+
   it("distingue las variantes de platos y los totales de una cuenta con propina", () => {
     const result = parseReceiptText(`
       2 SCHOP AUSTRAL CALAF       $09.380
