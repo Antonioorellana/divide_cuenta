@@ -4,6 +4,8 @@ import {
   allocateAmount,
   calculateBillDistribution,
   isItemFullyAssigned,
+  isValidLineTotal,
+  MAX_LINE_TOTAL,
 } from "../domain/billing.ts";
 import type { BillItem, Participant } from "../domain/models.ts";
 
@@ -12,6 +14,17 @@ const participants: Participant[] = [
   { id: "ana", name: "Ana", tone: "lavender" },
   { id: "luis", name: "Luis", tone: "blue" },
 ];
+
+describe("isValidLineTotal", () => {
+  it("admite los pesos positivos y enteros del rango editable de la boleta", () => {
+    assert.equal(isValidLineTotal(1), true);
+    assert.equal(isValidLineTotal(MAX_LINE_TOTAL), true);
+    assert.equal(isValidLineTotal(MAX_LINE_TOTAL + 1), false);
+    assert.equal(isValidLineTotal(Number.MAX_SAFE_INTEGER + 1), false);
+    assert.equal(isValidLineTotal(0), false);
+    assert.equal(isValidLineTotal(3.5), false);
+  });
+});
 
 describe("allocateAmount", () => {
   it("reconcilia un monto indivisible sin perder pesos", () => {
